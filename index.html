@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en" data-theme="classic">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Classic Image Editor</title>
+    <link rel="icon" href="/favicon.svg" />
+  </head>
+  <body>
+    <div id="app">
+      <div id="menubar" role="menubar"></div>
+      <div id="optionsbar" role="toolbar" aria-label="Tool options"></div>
+      <div id="main">
+        <div id="toolbox"></div>
+        <div id="docarea">
+          <div class="welcome" id="welcome">
+            <div>
+              <h1>Classic Image Editor</h1>
+              <p><kbd>Ctrl</kbd>+<kbd>N</kbd> new image &nbsp; <kbd>Ctrl</kbd>+<kbd>O</kbd> open</p>
+              <p>or drop image files here, or paste one</p>
+            </div>
+          </div>
+        </div>
+        <div id="palettes"></div>
+        <div id="floats"></div>
+      </div>
+      <div id="statusbar"></div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

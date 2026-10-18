@@ -1,0 +1,8 @@
+node_modules/
+dist/
+e2e/out/
+src-tauri/target/
+src-tauri/gen/
+*.log
+.DS_Store
+e2e/models/

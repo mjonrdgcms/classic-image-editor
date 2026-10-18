@@ -1,0 +1,115 @@
+sans|inter|Inter
+sans|roboto|Roboto
+sans|open-sans|Open Sans
+sans|lato|Lato
+sans|montserrat|Montserrat
+sans|poppins|Poppins
+sans|source-sans-3|Source Sans 3
+sans|nunito|Nunito
+sans|raleway|Raleway
+sans|work-sans|Work Sans
+sans|oswald|Oswald
+sans|barlow|Barlow
+sans|barlow-condensed|Barlow Condensed
+sans|archivo|Archivo
+sans|dm-sans|DM Sans
+sans|fira-sans|Fira Sans
+sans|pt-sans|PT Sans
+sans|ibm-plex-sans|IBM Plex Sans
+sans|rubik|Rubik
+sans|josefin-sans|Josefin Sans
+sans|quicksand|Quicksand
+sans|manrope|Manrope
+sans|space-grotesk|Space Grotesk
+sans|league-spartan|League Spartan
+serif|merriweather|Merriweather
+serif|playfair-display|Playfair Display
+serif|lora|Lora
+serif|libre-baskerville|Libre Baskerville
+serif|eb-garamond|EB Garamond
+serif|crimson-text|Crimson Text
+serif|pt-serif|PT Serif
+serif|cormorant-garamond|Cormorant Garamond
+serif|source-serif-4|Source Serif 4
+serif|bitter|Bitter
+serif|roboto-slab|Roboto Slab
+serif|zilla-slab|Zilla Slab
+serif|dm-serif-display|DM Serif Display
+serif|libre-caslon-text|Libre Caslon Text
+serif|spectral|Spectral
+display|bebas-neue|Bebas Neue
+display|anton|Anton
+display|abril-fatface|Abril Fatface
+display|alfa-slab-one|Alfa Slab One
+display|archivo-black|Archivo Black
+display|righteous|Righteous
+display|lobster|Lobster
+display|bungee|Bungee
+display|bungee-shade|Bungee Shade
+display|black-ops-one|Black Ops One
+display|russo-one|Russo One
+display|monoton|Monoton
+display|fredoka|Fredoka
+display|passion-one|Passion One
+display|staatliches|Staatliches
+display|ultra|Ultra
+display|bowlby-one-sc|Bowlby One SC
+display|orbitron|Orbitron
+display|audiowide|Audiowide
+display|cinzel|Cinzel
+display|cinzel-decorative|Cinzel Decorative
+display|unifrakturmaguntia|UnifrakturMaguntia
+display|rye|Rye
+display|sancreek|Sancreek
+display|special-elite|Special Elite
+display|press-start-2p|Press Start 2P
+display|vt323|VT323
+display|silkscreen|Silkscreen
+display|creepster|Creepster
+display|nosifer|Nosifer
+display|faster-one|Faster One
+display|poiret-one|Poiret One
+display|limelight|Limelight
+display|shrikhand|Shrikhand
+display|bungee-inline|Bungee Inline
+comic|bangers|Bangers
+comic|luckiest-guy|Luckiest Guy
+comic|chewy|Chewy
+comic|titan-one|Titan One
+comic|comic-neue|Comic Neue
+comic|rubik-mono-one|Rubik Mono One
+comic|boogaloo|Boogaloo
+comic|lilita-one|Lilita One
+comic|baloo-2|Baloo 2
+comic|sniglet|Sniglet
+comic|carter-one|Carter One
+comic|knewave|Knewave
+script|pacifico|Pacifico
+script|dancing-script|Dancing Script
+script|great-vibes|Great Vibes
+script|caveat|Caveat
+script|satisfy|Satisfy
+script|kaushan-script|Kaushan Script
+script|shadows-into-light|Shadows Into Light
+script|permanent-marker|Permanent Marker
+script|amatic-sc|Amatic SC
+script|indie-flower|Indie Flower
+script|sacramento|Sacramento
+script|yellowtail|Yellowtail
+script|homemade-apple|Homemade Apple
+script|rock-salt|Rock Salt
+script|patrick-hand|Patrick Hand
+script|gloria-hallelujah|Gloria Hallelujah
+script|allura|Allura
+script|parisienne|Parisienne
+script|alex-brush|Alex Brush
+script|marck-script|Marck Script
+script|cookie|Cookie
+script|courgette|Courgette
+mono|jetbrains-mono|JetBrains Mono
+mono|fira-code|Fira Code
+mono|source-code-pro|Source Code Pro
+mono|ibm-plex-mono|IBM Plex Mono
+mono|space-mono|Space Mono
+mono|courier-prime|Courier Prime
+mono|roboto-mono|Roboto Mono
