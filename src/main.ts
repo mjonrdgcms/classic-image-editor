@@ -239,6 +239,8 @@ function boot(): void {
         }
     });
   void openLaunched();
+  // The welcome hint names the Mac's Command key there.
+  if (/Mac/.test(navigator.platform)) document.querySelectorAll("kbd").forEach((k) => k.textContent === "Ctrl" && (k.textContent = "⌘"));
   // Closing the app window (or Cmd+Q) asks about unsaved images first.
   if (isDesktop) void watchQuit(app);
   // Crash recovery: keep copies of changed images; offer what a crash left behind.
