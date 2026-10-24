@@ -7,18 +7,22 @@ workflow, with a local AI assistant (via Ollama) on the roadmap.
 
 ## Download
 
+Get the latest version from the repository's **Releases** page.
+
 | System | Files | Notes |
 | --- | --- | --- |
-| Windows 10/11 | `Classic Image Editor X Setup.exe`, or the portable `.exe` | |
-| macOS 11 Big Sur or later (Apple silicon and Intel) | `Classic Image Editor X (macOS).dmg` | Open the disk image and drag the app to Applications. The app isn't notarized by Apple yet, so the first time, right-click it and choose **Open** (or allow it under System Settings > Privacy & Security). |
-| Ubuntu, Debian, Mint | `Classic Image Editor_X_amd64.deb` | `sudo apt install ./Classic*.deb` |
-| Fedora, openSUSE, RHEL | `Classic Image Editor-X-1.x86_64.rpm` | `sudo dnf install ./Classic*.rpm` |
-| Any 64-bit Linux | `Classic Image Editor_X_amd64.AppImage` | `chmod +x` it and run it; no install needed. |
+| Windows 10/11 | `Classic-Image-Editor_X_x64-setup.exe`, or the portable `_x64-portable.exe` | Not code-signed: at the SmartScreen prompt choose More info > Run anyway. |
+| macOS 11 Big Sur or later (Apple silicon and Intel) | `Classic-Image-Editor_X_macOS-universal.dmg` | Open the disk image and drag the app to Applications. The app isn't notarized by Apple yet, so the first time, right-click it and choose **Open** (or allow it under System Settings > Privacy & Security). |
+| Ubuntu 22.04+, Debian 12+, Mint | `Classic-Image-Editor_X_amd64.deb` | `sudo apt install ./Classic-Image-Editor_X_amd64.deb` |
+| Fedora, openSUSE, RHEL | `Classic-Image-Editor-X-1.x86_64.rpm` | `sudo dnf install ./Classic-Image-Editor-X-1.x86_64.rpm` |
+| Any 64-bit Linux | `Classic-Image-Editor_X_amd64.AppImage` | `chmod +x` it and run it; no install needed. |
 
-The macOS and Linux apps are built by `.github/workflows/desktop.yml`
-(Actions tab: download them from a run's artifacts). They draw with WebKit
-(Safari's engine) instead of Windows' WebView2, and the end-to-end suite
-runs in both engines.
+All of these are built by `.github/workflows/desktop.yml`. To publish a
+new version: bump the version (package.json, src-tauri/tauri.conf.json,
+src-tauri/Cargo.toml), edit `.github/release-notes.md`, push, then
+Actions > Desktop builds > Run workflow. The macOS and Linux apps draw with
+WebKit (Safari's engine) instead of Windows' WebView2, and the end-to-end
+suite runs in both engines.
 
 On a Mac, the Command key does everything Ctrl does in this README
 (Cmd+Z, Cmd-click on a thumbnail, holding Cmd for the Move tool), and Option

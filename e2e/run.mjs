@@ -26,6 +26,18 @@ page.on("pageerror", (e) => errors.push(e.message));
 // MediaPipe's WebAssembly prints its INFO/WARNING logs to stderr, which shows up as console errors.
 page.on("console", (m) => m.type() === "error" && !/^(INFO|WARNING):|^[IW]\d{4} /.test(m.text()) && errors.push(m.text()));
 
+// On CI, show the page's errors as they happen and give up (with a screenshot) instead of hanging.
+if (process.env.CI) {
+  page.on("pageerror", (e) => console.log("PAGE ERROR", e.message));
+  page.on("console", (m) => m.type() === "error" && console.log("CONSOLE ERROR", m.text().slice(0, 300)));
+  page.on("dialog", (d) => console.log("DIALOG", d.message()));
+  setTimeout(async () => {
+    console.log("TIMEOUT: the checks took over 25 minutes");
+    await page.screenshot({ path: out + "timeout.png" }).catch(() => {});
+    process.exit(2);
+  }, 25 * 60e3).unref();
+}
+
 let failures = 0;
 const check = (name, ok, detail = "") => {
   console.log(`${ok ? "PASS" : "FAIL"}  ${name}${detail ? "  " + detail : ""}`);
@@ -42,6 +54,10 @@ await page.evaluate(() => localStorage.clear());
 await page.reload();
 await page.waitForFunction(() => window.editor);
 await page.screenshot({ path: out + "01-empty.png" });
+console.log("started", JSON.stringify(await ev(() => {
+  const gl = document.createElement("canvas").getContext("webgl2");
+  return { ua: navigator.userAgent, renderer: gl && gl.getParameter(gl.RENDERER), max: window.editor.app.maxTextureSize };
+})));
 
 // ======================================================= GPU vs CPU parity
 const parity = await ev(() => {

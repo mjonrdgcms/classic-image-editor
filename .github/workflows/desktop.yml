@@ -1,14 +1,23 @@
-# Builds the macOS and Linux apps (and runs the browser checks in WebKit, the
-# engine both of them use). Runs on pushes to desktop-builds, on version tags,
-# and by hand from the Actions tab. The finished apps are attached to each run
-# as downloadable artifacts.
+# Builds Classic Image Editor for Windows, macOS and Linux.
+#
+# - Runs on pushes to desktop-builds and on pull requests: the finished apps
+#   are attached to each run as downloadable artifacts.
+# - Actions tab > Desktop builds > Run workflow, with "Publish a release"
+#   ticked, also creates the GitHub release vX.Y.Z (X.Y.Z from package.json)
+#   with every file, release notes from .github/release-notes.md, and
+#   SHA-256 checksums.
 name: Desktop builds
 
 on:
   push:
     branches: [desktop-builds]
-    tags: ["v*"]
+  pull_request:
   workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish a release with the files
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -18,6 +27,38 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  windows:
+    name: Windows
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+      - run: npm ci
+      - name: Build the installer and the portable app
+        run: npx tauri build --bundles nsis
+      - name: Collect the files
+        shell: bash
+        run: |
+          set -e
+          V=$(node -p "require('./package.json').version")
+          mkdir -p out
+          cp src-tauri/target/release/bundle/nsis/*-setup.exe "out/Classic-Image-Editor_${V}_x64-setup.exe"
+          cp src-tauri/target/release/classic-image-editor.exe "out/Classic-Image-Editor_${V}_x64-portable.exe"
+          ls -l out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: out/*
+          if-no-files-found: error
+
   macos:
     name: macOS (Apple silicon + Intel)
     runs-on: macos-14
@@ -38,32 +79,38 @@ jobs:
       - run: npm test
       - name: Build the universal app and disk image
         run: npx tauri build --target universal-apple-darwin --bundles app,dmg
-      - name: Collect the app
+      - name: Collect the files
         run: |
           set -e
           B=src-tauri/target/universal-apple-darwin/release/bundle
           V=$(node -p "require('./package.json').version")
           mkdir -p out
-          cp "$B"/dmg/*.dmg "out/Classic Image Editor $V (macOS).dmg"
+          cp "$B"/dmg/*.dmg "out/Classic-Image-Editor_${V}_macOS-universal.dmg"
           # A zip of the .app, for people who'd rather not mount a disk image.
-          ditto -c -k --keepParent "$B/macos/Classic Image Editor.app" "out/Classic Image Editor $V (macOS app).zip"
+          ditto -c -k --keepParent "$B/macos/Classic Image Editor.app" "out/Classic-Image-Editor_${V}_macOS-universal.app.zip"
           ls -l out
       - uses: actions/upload-artifact@v4
         with:
           name: macos
           path: out/*
           if-no-files-found: error
-      # The browser checks in Safari's engine on a real Mac (WebGL2 through Metal).
-      - name: WebKit checks
+      # Start the built app and take a screenshot of it.
+      - name: Launch the app
         continue-on-error: true
         run: |
-          npx playwright install webkit
-          E2E_BROWSER=webkit npm run e2e
+          APP="src-tauri/target/universal-apple-darwin/release/bundle/macos/Classic Image Editor.app"
+          "$APP/Contents/MacOS/classic-image-editor" > app.log 2>&1 &
+          PID=$!
+          sleep 25
+          mkdir -p shots
+          screencapture -x shots/macos-app.png || true
+          if kill -0 $PID 2>/dev/null; then echo "the app is running"; kill $PID; else echo "the app exited"; cat app.log; exit 1; fi
+          cat app.log
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: macos-webkit-screenshots
-          path: e2e/out-webkit/
+          name: macos-app-screenshot
+          path: shots/
           if-no-files-found: ignore
 
   linux:
@@ -89,15 +136,76 @@ jobs:
       - run: npm test
       - name: Build the packages
         run: npx tauri build --bundles deb,rpm,appimage
-      - name: Collect the packages
+      - name: Collect the files
         run: |
           set -e
           B=src-tauri/target/release/bundle
+          V=$(node -p "require('./package.json').version")
           mkdir -p out
-          cp "$B"/deb/*.deb "$B"/rpm/*.rpm "$B"/appimage/*.AppImage out/
+          cp "$B"/deb/*.deb "out/Classic-Image-Editor_${V}_amd64.deb"
+          cp "$B"/rpm/*.rpm "out/Classic-Image-Editor-${V}-1.x86_64.rpm"
+          cp "$B"/appimage/*.AppImage "out/Classic-Image-Editor_${V}_amd64.AppImage"
           ls -l out
       - uses: actions/upload-artifact@v4
         with:
           name: linux
           path: out/*
           if-no-files-found: error
+
+  # The browser checks in Safari's engine on a real Mac. Informational: it
+  # doesn't hold up the builds or the release.
+  macos-webkit:
+    name: WebKit checks on macOS
+    if: github.event_name != 'workflow_dispatch'
+    runs-on: macos-14
+    timeout-minutes: 40
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npx playwright install webkit
+      - run: E2E_BROWSER=webkit npm run e2e
+        timeout-minutes: 30
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: macos-webkit-screenshots
+          path: e2e/out-webkit/
+          if-no-files-found: ignore
+
+  release:
+    name: Publish the release
+    if: github.event_name == 'workflow_dispatch' && inputs.publish
+    needs: [windows, macos, linux]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist-release
+          merge-multiple: true
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          V=$(node -p "require('./package.json').version")
+          cd dist-release
+          ls -l
+          F="Classic-Image-Editor_${V}_x64-setup.exe Classic-Image-Editor_${V}_x64-portable.exe Classic-Image-Editor_${V}_macOS-universal.dmg Classic-Image-Editor_${V}_macOS-universal.app.zip Classic-Image-Editor_${V}_amd64.deb Classic-Image-Editor-${V}-1.x86_64.rpm Classic-Image-Editor_${V}_amd64.AppImage"
+          {
+            sed "s/{{VERSION}}/${V}/g" ../.github/release-notes.md
+            echo
+            echo "### SHA-256"
+            echo '```'
+            sha256sum $F
+            echo '```'
+          } > notes.md
+          gh release create "v${V}" $F --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Classic Image Editor ${V}" --notes-file notes.md
