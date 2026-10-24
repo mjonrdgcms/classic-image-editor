@@ -16,9 +16,9 @@ import { rectIntersect } from "./tiles";
 const gray = (c: RGBA) => Math.round(0.3 * c[0] + 0.59 * c[1] + 0.11 * c[2]);
 
 /** Blend a solid color over a layer region through a coverage mask (0..255, null = all). */
-function paintThrough(layer: Layer, region: Rect, cov: Uint8Array | null, color: RGBA, opacity: number): void {
+function paintThrough(layer: Layer, region: Rect, cov: Uint8Array | null, color: RGBA, opacity: number, preserve = false): void {
   const px = layer.grid.readRegion(region);
-  const keepAlpha = layer.locks.transparency;
+  const keepAlpha = layer.locks.transparency || preserve;
   for (let i = 0, p = 0; i < region.w * region.h; i++, p += 4) {
     const a = (color[3] / 255) * opacity * (cov ? cov[i] / 255 : 1);
     if (a <= 0) continue;
@@ -48,7 +48,8 @@ function canvasRect(l: Layer, r: Rect): Rect {
 }
 
 /** Edit > Fill. Returns the canvas rect changed. */
-export function fillArea(doc: Document, target: PaintTarget, color: RGBA, opacity: number): Rect | null {
+/** preserve: keep the layer's transparency (Shift+Alt+Backspace / Shift+Ctrl+Backspace). */
+export function fillArea(doc: Document, target: PaintTarget, color: RGBA, opacity: number, preserve = false): Rect | null {
   if (target.kind === "selection") {
     // Quick Mask with nothing selected starts from an empty selection.
     const m = (doc.selection ??= new Mask(doc.width, doc.height, 0));
@@ -66,7 +67,7 @@ export function fillArea(doc: Document, target: PaintTarget, color: RGBA, opacit
   const layer = target.layer;
   const ea = editArea(doc, layer);
   if (!ea) return null;
-  paintThrough(layer, ea.area, ea.cov, color, opacity);
+  paintThrough(layer, ea.area, ea.cov, color, opacity, preserve);
   return canvasRect(layer, ea.area);
 }
 

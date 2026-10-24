@@ -151,6 +151,12 @@ const COMMON_SYSTEM = [
   "Helvetica", "Helvetica Neue", "Avenir", "Avenir Next", "Futura", "Gill Sans", "Optima", "Baskerville", "Didot", "Hoefler Text",
   "American Typewriter", "Chalkboard", "Marker Felt", "Menlo", "Monaco", "SF Pro", "DejaVu Sans", "DejaVu Serif", "Liberation Sans",
   "Liberation Serif", "Noto Sans", "Noto Serif", "Ubuntu", "Cantarell",
+  // More of macOS's own.
+  "Arial Rounded MT Bold", "Chalkduster", "Cochin", "Copperplate", "Courier", "Geneva", "Lucida Grande", "Noteworthy", "Palatino",
+  "Skia", "Snell Roundhand", "Zapfino", "Times", "Trattatello", "Big Caslon", "Bradley Hand", "Phosphate",
+  // More of Linux's usual ones.
+  "DejaVu Sans Mono", "Liberation Mono", "Noto Sans Mono", "Ubuntu Mono", "FreeSans", "FreeSerif", "FreeMono", "Nimbus Sans",
+  "Nimbus Roman", "Nimbus Mono PS", "URW Bookman", "URW Gothic", "C059", "P052", "Z003", "Droid Sans", "Open Sans", "Roboto", "Fira Sans",
 ];
 
 /** Is a family installed? (Compare its width against the generic fallbacks.) */

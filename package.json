@@ -1,6 +1,6 @@
 {
   "name": "classic-image-editor",
-  "version": "0.10.0",
+  "version": "0.12.0",
   "description": "A fast, offline image editor in the spirit of classic Photoshop 7, with local AI via Ollama",
   "scripts": {
     "dev": "vite",

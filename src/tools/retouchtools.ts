@@ -68,7 +68,7 @@ let cloneSource: CloneSource | null = null;
 /** Where the pointer is while painting with an offset (for the source crosshair). */
 let liveOffset: [number, number] | null = null;
 
-export function makeRetouchTools(app: App): Record<RetouchToolId | "redEye" | "magicEraser", Tool> {
+export function makeRetouchTools(app: App): Record<RetouchToolId | "redEye" | "magicEraser", Tool> & { eraseToHistory: Tool } {
   // Source crosshair for Clone Stamp and Healing Brush.
   app.overlayPainters.add((ctx, s, v) => {
     const id = app.tool.id;
@@ -125,8 +125,9 @@ export function makeRetouchTools(app: App): Record<RetouchToolId | "redEye" | "m
     return l;
   };
 
-  const make = (id: RetouchToolId): Tool => {
-    const info = INFO[id];
+  /** eraser: the Eraser's Erase to History (the History Brush with the Eraser's brush and opacity). */
+  const make = (id: RetouchToolId, eraser = false): Tool => {
+    const info = eraser ? { ...INFO[id], label: "Eraser Tool" } : INFO[id];
     const tool: Tool = {
       id,
       label: info.label,
@@ -162,11 +163,12 @@ export function makeRetouchTools(app: App): Record<RetouchToolId | "redEye" | "m
           if (aligned) cloneSource.offset = offset;
           liveOffset = offset;
         }
-        const brush = app.toolBrush[id];
+        const brush = eraser ? app.toolBrush.eraser : app.toolBrush[id];
         const pattern = id === "patternStamp" ? app.patterns[Math.min(s.patternIndex, app.patterns.length - 1)] : undefined;
         if (id === "patternStamp" && !pattern) return void app.toast("There are no patterns. Make one with Edit > Define Pattern.");
-        const strength =
-          id === "patternStamp"
+        const strength = eraser
+          ? s.eraserOpacity
+          : id === "patternStamp"
             ? s.patternStampOpacity
             : id === "artHistory"
               ? s.artOpacity
@@ -347,7 +349,7 @@ export function makeRetouchTools(app: App): Record<RetouchToolId | "redEye" | "m
   ];
   const out = {} as Record<RetouchToolId | "redEye" | "magicEraser", Tool>;
   for (const id of order) out[id] = id === "redEye" ? redEye : id === "magicEraser" ? magicEraser : make(id);
-  return out;
+  return { ...out, eraseToHistory: make("historyBrush", true) };
 }
 
 /** The History Brush source choices for the options bar. */

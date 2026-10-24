@@ -3,12 +3,12 @@
  * preset picker on the left and the palette well on the right.
  */
 
-import type { App, ToolSettings } from "../app";
+import type { App, AutoSelect, ToolSettings } from "../app";
 import { BLEND_LABELS, BLEND_MODES } from "../core/blend";
 import { presetFromJSON, presetToJSON } from "../core/brushes";
 import type { SelectMode } from "../core/selection";
 import { GRADIENT_LABELS, GRADIENT_PRESETS, GRADIENT_TYPES, GRADIENT_TYPE_LABELS, GradientPreset, GradientType, gradientLUT, gradientT, presetStops } from "../core/gradient";
-import type { CropTool } from "../tools/tools";
+import { autoSelectMode, type CropTool } from "../tools/tools";
 import { dabThumb } from "./brushpreview";
 import { toolPresetsStore } from "./brushes";
 import { el, formDialog } from "./dialogs";
@@ -66,6 +66,16 @@ export function mountOptionsBar(root: HTMLElement, app: App, openBrushes: () => 
       render();
     });
     return { node: el("label", {}, label + ":", s), sync: () => (s.value = String(app.settings[key])) };
+  };
+  /** Move tool: Auto-Select Off / Layer / Layer Set. */
+  const autoSelectPart = (): Part => {
+    const s = el("select", { "aria-label": "Auto-Select", title: "Off: the Move tool moves the layers chosen in the Layers palette. Layer / Layer Set: clicking picks what is under the pointer." });
+    for (const [v, l] of [["off", "Off"], ["layer", "Layer"], ["set", "Layer Set"]]) s.append(el("option", { value: v, text: l }));
+    s.addEventListener("change", () => {
+      app.settings.moveAutoSelect = s.value as AutoSelect;
+      app.emit("settings");
+    });
+    return { node: el("label", {}, "Auto-Select:", s), sync: () => (s.value = autoSelectMode(app.settings.moveAutoSelect)) };
   };
   const sep = (): Part => ({ node: el("span", { class: "sep" }), sync: () => {} });
   const note = (text: string): Part => ({ node: el("span", { class: "note", text }), sync: () => {} });
@@ -355,6 +365,8 @@ export function mountOptionsBar(root: HTMLElement, app: App, openBrushes: () => 
           sep(),
           number("Opacity", "eraserOpacity", 1, 100, "%"),
           ...(s.eraserMode === "brush" ? [number("Flow", "eraserFlow", 1, 100, "%"), airbrush()] : []),
+          sep(),
+          check("Erase to History", "eraserToHistory"),
         ];
         break;
       case "stamp":
@@ -370,6 +382,7 @@ export function mountOptionsBar(root: HTMLElement, app: App, openBrushes: () => 
       case "freeformPen":
         parts = [
           choice("Draw", "penMode", [["path", "Paths"], ["shape", "Shape Layers"]]),
+          ...(t.id === "pen" ? [check("Auto Add/Delete", "penAutoAddDelete")] : []),
           sep(),
           note(t.id === "pen" ? "Click for corners, drag for curves; click the first point to close. Ctrl: Direct Selection." : "Drag to draw; end at the start to close."),
           sep(),
@@ -551,7 +564,8 @@ export function mountOptionsBar(root: HTMLElement, app: App, openBrushes: () => 
           return { node: b, sync: () => ((b as HTMLButtonElement).disabled = !app.hasDoc || !app.bus.isEnabled(cmd)) };
         };
         parts = [
-          check("Auto Select Layer", "moveAutoSelect"),
+          autoSelectPart(),
+          check("Show Bounding Box", "moveShowBounds"),
           sep(),
           ab("alignTop", "Align top edges", "layer.align", "top"),
           ab("alignVcenter", "Align vertical centers", "layer.align", "vcenter"),
@@ -584,6 +598,7 @@ export function mountOptionsBar(root: HTMLElement, app: App, openBrushes: () => 
   app.on("doc", () => (app.tool.id === "type" || app.tool.id === "faceSwap" || app.tool.id === "move") && parts.forEach((p) => p.sync()));
   app.on("settings", () => parts.forEach((p) => p.sync()));
   app.on("brushes", () => parts.forEach((p) => p.sync()));
+  app.on("prefs", () => parts.forEach((p) => p.sync()));
   render();
   return well;
 }

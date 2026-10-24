@@ -341,18 +341,19 @@ export const editCommands: CommandDef[] = [
         use: { type: "string", enum: ["foreground", "background", "black", "white", "gray", "pattern"], default: "foreground" },
         opacity: { ...percent("Fill opacity in percent"), default: 100 },
         pattern: { ...PATTERN_SCHEMA, description: "The pattern, when use is pattern" },
+        preserveTransparency: { type: "boolean", default: false, description: "Only color pixels that are already there" },
       },
     },
     history: true,
     enabled: canPaint,
-    run(ctx, p: { use: string; opacity: number; pattern?: { name?: string; w: number; h: number; b64: string } }) {
+    run(ctx, p: { use: string; opacity: number; preserveTransparency?: boolean; pattern?: { name?: string; w: number; h: number; b64: string } }) {
       if (p.use === "pattern") {
         if (!p.pattern) throw new ValidationError("choose a pattern to fill with");
         const r = fillPatternArea(ctx.doc, paintTarget(ctx), patternFromJSON(p.pattern), p.opacity / 100);
         if (r) ctx.doc.dirty(r);
         return;
       }
-      const r = fillArea(ctx.doc, paintTarget(ctx), fillColor(ctx, p.use), p.opacity / 100);
+      const r = fillArea(ctx.doc, paintTarget(ctx), fillColor(ctx, p.use), p.opacity / 100, !!p.preserveTransparency);
       if (r) ctx.doc.dirty(r);
     },
   },

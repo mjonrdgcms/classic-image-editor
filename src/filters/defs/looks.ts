@@ -634,6 +634,60 @@ export const lookFilters: FilterDef[] = [
     },
   },
   {
+    id: "autoColor",
+    name: "Auto Color",
+    category: T,
+    description: "Corrects color casts: the darkest and lightest colors become black and white, and near-gray midtones become neutral.",
+    adjustment: true,
+    params: [pct("clip", "Clip", 0.5, 0, 10), check("neutral", "Snap Neutral Midtones", true)],
+    run(src, p) {
+      const d = src.data;
+      const h = histogram(src).l;
+      const lo = percentile(h, p.clip / 100), hi = percentile(h, 1 - p.clip / 100);
+      // Average color of the darkest and of the lightest pixels.
+      const dark = [0, 0, 0, 0], light = [0, 0, 0, 0];
+      for (let i = 0; i < d.length; i += 4) {
+        if (d[i + 3] < 8) continue;
+        const l = Math.round(luma(d[i], d[i + 1], d[i + 2]));
+        const t = l <= lo ? dark : l >= hi ? light : null;
+        if (!t) continue;
+        t[0] += d[i];
+        t[1] += d[i + 1];
+        t[2] += d[i + 2];
+        t[3]++;
+      }
+      const lut = [0, 1, 2].map((c) => {
+        const a = dark[3] ? dark[c] / dark[3] : 0, b = light[3] ? light[c] / light[3] : 255;
+        const k = 255 / Math.max(1, b - a);
+        return Float32Array.from({ length: 256 }, (_, v) => clamp((v - a) * k, 0, 255));
+      });
+      if (p.neutral) {
+        // Near-gray midtones after the stretch: bend each channel's gamma so their average is gray.
+        const sum = [0, 0, 0];
+        let n = 0;
+        for (let i = 0; i < d.length; i += 4) {
+          if (d[i + 3] < 8) continue;
+          const r = lut[0][d[i]], g = lut[1][d[i + 1]], b = lut[2][d[i + 2]];
+          const mx = Math.max(r, g, b), mn = Math.min(r, g, b), l = (r + g + b) / 3;
+          if (l < 48 || l > 208 || mx - mn > 40) continue;
+          sum[0] += r;
+          sum[1] += g;
+          sum[2] += b;
+          n++;
+        }
+        if (n > 16) {
+          const avg = sum.map((v) => v / n), gray = (avg[0] + avg[1] + avg[2]) / 3;
+          for (let c = 0; c < 3; c++) {
+            const g = Math.log(gray / 255) / Math.log(Math.min(254, Math.max(1, avg[c])) / 255);
+            const gamma = clamp(g, 0.5, 2);
+            for (let v = 0; v < 256; v++) lut[c][v] = 255 * Math.pow(lut[c][v] / 255, gamma);
+          }
+        }
+      }
+      return mapRGB(src, (r, g, b) => [lut[0][r], lut[1][g], lut[2][b]]);
+    },
+  },
+  {
     id: "autoContrast",
     name: "Auto Contrast",
     category: T,

@@ -7,6 +7,8 @@
 //! system's curl (built into Windows 10 and later), so the editor itself
 //! carries no HTTP stack.
 
+mod scratch;
+
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -254,15 +256,151 @@ fn model_remove(app: tauri::AppHandle, names: Vec<String>) -> Result<(), String>
     Ok(())
 }
 
+/// The page is running and will answer close requests (until then, closing just closes).
+static FRONTEND_READY: AtomicBool = AtomicBool::new(false);
+/// The page answered the last close request (it shows its own "unsaved changes" question).
+static CLOSE_ACKED: AtomicBool = AtomicBool::new(false);
+
+#[tauri::command]
+fn frontend_ready() {
+    FRONTEND_READY.store(true, Ordering::SeqCst);
+}
+
+#[tauri::command]
+fn close_ack() {
+    CLOSE_ACKED.store(true, Ordering::SeqCst);
+}
+
+/// Quit for real (the page has checked for unsaved changes).
+#[tauri::command]
+fn quit_app(app: tauri::AppHandle) {
+    scratch::scratch_shutdown();
+    app.exit(0);
+}
+
+/// Closing the window (or Cmd+Q on a Mac) asks the page first, so unsaved images
+/// aren't lost. If the page doesn't answer within a few seconds (it hung), the
+/// editor closes anyway.
+fn request_close(app: &tauri::AppHandle) -> bool {
+    use tauri::Emitter;
+    if !FRONTEND_READY.load(Ordering::SeqCst) {
+        return false;
+    }
+    CLOSE_ACKED.store(false, Ordering::SeqCst);
+    let _ = app.emit("close-requested", ());
+    let handle = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_secs(4));
+        if !CLOSE_ACKED.load(Ordering::SeqCst) {
+            scratch::scratch_shutdown();
+            handle.exit(0);
+        }
+    });
+    true
+}
+
+/// Linux: WebKitGTK's DMA-BUF renderer shows a blank window with NVIDIA's driver; use the older path there.
+fn linux_webkit_workarounds() {
+    #[cfg(target_os = "linux")]
+    if std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() && std::path::Path::new("/proc/driver/nvidia").exists() {
+        std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+    }
+}
+
+/// macOS menu bar: the application menu and an Edit menu for typing in fields.
+/// Undo, Select All and the rest stay with the editor's own shortcuts, so the
+/// menu doesn't swallow Cmd+Z, Cmd+A, Cmd+H (Extras) or Cmd+M (Curves).
+#[cfg(target_os = "macos")]
+fn mac_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
+    use tauri::menu::{AboutMetadata, Menu, MenuItem, PredefinedMenuItem, Submenu};
+    let about = AboutMetadata { version: Some(env!("CARGO_PKG_VERSION").into()), ..Default::default() };
+    let app_menu = Submenu::with_items(
+        app,
+        "Classic Image Editor",
+        true,
+        &[
+            &PredefinedMenuItem::about(app, Some("About Classic Image Editor"), Some(about))?,
+            &PredefinedMenuItem::separator(app)?,
+            &PredefinedMenuItem::services(app, None)?,
+            &PredefinedMenuItem::separator(app)?,
+            &MenuItem::with_id(app, "hide", "Hide Classic Image Editor", true, None::<&str>)?,
+            &PredefinedMenuItem::hide_others(app, None)?,
+            &PredefinedMenuItem::show_all(app, None)?,
+            &PredefinedMenuItem::separator(app)?,
+            &MenuItem::with_id(app, "quit", "Quit Classic Image Editor", true, Some("CmdOrCtrl+Q"))?,
+        ],
+    )?;
+    let edit = Submenu::with_items(
+        app,
+        "Edit",
+        true,
+        &[&PredefinedMenuItem::cut(app, None)?, &PredefinedMenuItem::copy(app, None)?, &PredefinedMenuItem::paste(app, None)?],
+    )?;
+    let window = Submenu::with_items(app, "Window", true, &[&PredefinedMenuItem::fullscreen(app, None)?])?;
+    Menu::with_items(app, &[&app_menu, &edit, &window])
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    linux_webkit_workarounds();
+    let builder = tauri::Builder::default();
+    #[cfg(target_os = "macos")]
+    let builder = builder.menu(mac_menu).on_menu_event(|app, event| match event.id().as_ref() {
+        "quit" => {
+            if !request_close(app) {
+                scratch::scratch_shutdown();
+                app.exit(0);
+            }
+        }
+        "hide" => {
+            let _ = app.hide();
+        }
+        _ => {}
+    });
+    builder
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                if request_close(window.app_handle()) {
+                    api.prevent_close();
+                }
+            }
+        })
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
-        .invoke_handler(tauri::generate_handler![app_info, launch_files, read_user_file, write_user_file, model_status, model_download, model_cancel, model_read, model_write, model_remove])
+        .invoke_handler(tauri::generate_handler![
+            app_info,
+            launch_files,
+            read_user_file,
+            write_user_file,
+            model_status,
+            model_download,
+            model_cancel,
+            model_read,
+            model_write,
+            model_remove,
+            scratch::scratch_configure,
+            scratch::scratch_disk_info,
+            scratch::scratch_default_dir,
+            scratch::scratch_write,
+            scratch::scratch_read,
+            scratch::scratch_remove,
+            scratch::system_memory,
+            scratch::recovery_save,
+            scratch::recovery_forget,
+            scratch::recovery_list,
+            scratch::recovery_read,
+            scratch::recovery_discard,
+            frontend_ready,
+            close_ack,
+            quit_app
+        ])
         .build(tauri::generate_context!())
         .expect("error while running the editor")
         .run(|_app, _event| {
+            // A normal exit leaves no scratch files (or recovery copies) behind.
+            if let tauri::RunEvent::Exit = &_event {
+                scratch::scratch_shutdown();
+            }
             // macOS opens documents with an event rather than command-line arguments.
             #[cfg(any(target_os = "macos", target_os = "ios"))]
             if let tauri::RunEvent::Opened { urls } = &_event {

@@ -5,6 +5,7 @@
 
 import type { App, Session } from "../app";
 import { outlineSegments } from "../core/selection";
+import { fromUnits } from "../prefs";
 
 export class Overlay {
   private ctx: CanvasRenderingContext2D;
@@ -123,35 +124,73 @@ export class Overlay {
     const cw = c.clientWidth, ch = c.clientHeight;
     const docA = toScreen(0, 0), docB = toScreen(doc.width, doc.height);
 
-    // Grid.
+    // Pixel grid, when zoomed in far enough to see single pixels (Preferences > Display).
+    if (app.prefs.pixelGrid && v.zoom >= 6) {
+      ctx.beginPath();
+      const x0 = Math.max(0, Math.floor(toCanvas(0, 0).x)), x1 = Math.min(doc.width, Math.ceil(toCanvas(cw, 0).x));
+      const y0 = Math.max(0, Math.floor(toCanvas(0, 0).y)), y1 = Math.min(doc.height, Math.ceil(toCanvas(0, ch).y));
+      for (let x = x0; x <= x1; x++) {
+        const sx = Math.round(toScreen(x, 0).x) + 0.5;
+        ctx.moveTo(sx, Math.max(0, docA.y));
+        ctx.lineTo(sx, Math.min(ch, docB.y));
+      }
+      for (let y = y0; y <= y1; y++) {
+        const sy = Math.round(toScreen(0, y).y) + 0.5;
+        ctx.moveTo(Math.max(0, docA.x), sy);
+        ctx.lineTo(Math.min(cw, docB.x), sy);
+      }
+      ctx.strokeStyle = "rgba(128,128,128,0.35)";
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
+
+    // Grid (spacing in Preferences > Guides, Grid & Slices units; percent is of the image's size).
     if (extras && app.view.grid) {
-      const sp = app.prefs.gridSpacing;
-      const sub = Math.max(1, app.prefs.gridSubdivisions);
-      const step = sp / sub;
-      if (step * v.zoom >= 5 || sp * v.zoom >= 8) {
-        const fine = step * v.zoom >= 5;
+      const P = app.prefs;
+      const spX = Math.max(0.5, fromUnits(P.gridSpacing, P.gridUnits, doc.resolution, P.pointsPerInch, doc.width));
+      const spY = Math.max(0.5, fromUnits(P.gridSpacing, P.gridUnits, doc.resolution, P.pointsPerInch, doc.height));
+      const sub = Math.max(1, P.gridSubdivisions);
+      if ((spX / sub) * v.zoom >= 5 || Math.min(spX, spY) * v.zoom >= 8) {
+        const fine = (spX / sub) * v.zoom >= 5;
+        const style = P.gridStyle;
         const lines = (major: boolean) => {
           ctx.beginPath();
-          const s = major ? sp : step;
-          const x0 = Math.max(0, Math.floor(toCanvas(0, 0).x / s) * s);
+          const sx_ = major ? spX : spX / sub, sy_ = major ? spY : spY / sub;
+          const isMajor = (v: number, sp: number) => Math.abs(v / sp - Math.round(v / sp)) < 1e-6;
+          const i0 = Math.max(0, Math.floor(toCanvas(0, 0).x / sx_));
           const x1 = Math.min(doc.width, toCanvas(cw, 0).x);
-          for (let x = x0; x <= x1; x += s) {
-            if (!major && x % sp === 0) continue;
+          const xs: number[] = [];
+          for (let i = i0; i * sx_ <= x1 + 1e-6; i++) if (major || !isMajor(i * sx_, spX)) xs.push(i * sx_);
+          const j0 = Math.max(0, Math.floor(toCanvas(0, 0).y / sy_));
+          const y1 = Math.min(doc.height, toCanvas(0, ch).y);
+          const ys: number[] = [];
+          for (let j = j0; j * sy_ <= y1 + 1e-6; j++) if (major || !isMajor(j * sy_, spY)) ys.push(j * sy_);
+          if (style === "dots") {
+            // Dots where lines cross.
+            ctx.fillStyle = P.gridColor;
+            ctx.globalAlpha = major ? 0.95 : 0.5;
+            const allX = major ? xs : [...xs];
+            for (const x of allX)
+              for (const y of ys) {
+                const p = toScreen(x, y);
+                ctx.fillRect(Math.round(p.x), Math.round(p.y), 1, 1);
+              }
+            ctx.globalAlpha = 1;
+            return;
+          }
+          for (const x of xs) {
             const sx = Math.round(toScreen(x, 0).x) + 0.5;
             ctx.moveTo(sx, Math.max(0, docA.y));
             ctx.lineTo(sx, Math.min(ch, docB.y));
           }
-          const y0 = Math.max(0, Math.floor(toCanvas(0, 0).y / s) * s);
-          const y1 = Math.min(doc.height, toCanvas(0, ch).y);
-          for (let y = y0; y <= y1; y += s) {
-            if (!major && y % sp === 0) continue;
+          for (const y of ys) {
             const sy = Math.round(toScreen(0, y).y) + 0.5;
             ctx.moveTo(Math.max(0, docA.x), sy);
             ctx.lineTo(Math.min(cw, docB.x), sy);
           }
-          ctx.strokeStyle = app.prefs.gridColor;
+          ctx.strokeStyle = P.gridColor;
           ctx.globalAlpha = major ? 0.9 : 0.45;
-          ctx.setLineDash(major ? [] : [2, 2]);
+          ctx.setLineDash(style === "dashed" ? [4, 3] : major ? [] : [2, 2]);
           ctx.lineWidth = 1;
           ctx.stroke();
         };
@@ -166,6 +205,7 @@ export class Overlay {
     if (extras && app.view.guides && (doc.guides.h.length || doc.guides.v.length)) {
       ctx.strokeStyle = app.prefs.guideColor;
       ctx.lineWidth = 1;
+      ctx.setLineDash(app.prefs.guideStyle === "dashed" ? [5, 4] : []);
       ctx.beginPath();
       for (const y of doc.guides.h) {
         const sy = Math.round(toScreen(0, y).y) + 0.5;
@@ -178,6 +218,7 @@ export class Overlay {
         ctx.lineTo(sx, ch);
       }
       ctx.stroke();
+      ctx.setLineDash([]);
     }
     const g = active ? app.preview.guide : null;
     if (g) {
@@ -285,7 +326,7 @@ export class Overlay {
     // Brush outline cursor.
     const brush = app.activeBrush;
     if (brush && app.pointer) {
-      if (app.prefs.paintingCursor === "brushSize" && app.pointer) {
+      if (app.paintingCursor === "brushSize" && app.pointer) {
         const p = toScreen(app.pointer.x, app.pointer.y);
         const eraserBlock = app.tool.id === "eraser" && app.settings.eraserMode === "block";
         const size = eraserBlock ? 16 : brush.size;
@@ -310,7 +351,7 @@ export class Overlay {
         ctx.strokeStyle = "rgba(255,255,255,0.85)";
         ctx.stroke();
         ctx.restore();
-        if (rad < 4) {
+        if (rad < 4 || app.prefs.brushCrosshair) {
           ctx.beginPath();
           ctx.moveTo(p.x - 5, p.y);
           ctx.lineTo(p.x + 5, p.y);

@@ -7,6 +7,8 @@
  * decoders (TIFF, PSD, 16-bit) arrive with the file-format milestone.
  */
 
+import { readDensity } from "./density";
+
 export const isDesktop = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
 export interface DecodedImage {
@@ -15,6 +17,8 @@ export interface DecodedImage {
   height: number;
   /** Straight RGBA. */
   data: Uint8ClampedArray;
+  /** Pixels per inch, when the file says. */
+  resolution?: number;
 }
 
 const IMAGE_EXTS = ["png", "jpg", "jpeg", "gif", "bmp", "webp", "avif"];
@@ -40,7 +44,9 @@ export async function decodeImage(blob: Blob, name: string): Promise<DecodedImag
   ctx.drawImage(bmp, 0, 0);
   const img = ctx.getImageData(0, 0, bmp.width, bmp.height);
   bmp.close();
-  return { name, width: img.width, height: img.height, data: img.data };
+  // The resolution is in the file's header.
+  const head = new Uint8Array(await blob.slice(0, 1 << 18).arrayBuffer().catch(() => new ArrayBuffer(0)));
+  return { name, width: img.width, height: img.height, data: img.data, resolution: readDensity(head) ?? undefined };
 }
 
 /** Ask the user for an image. Returns null if they cancelled. */

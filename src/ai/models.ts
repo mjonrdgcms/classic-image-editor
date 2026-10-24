@@ -138,7 +138,7 @@ const webStore = (): Store => {
       const r = indexedDB.open(DB, 1);
       r.onupgradeneeded = () => r.result.createObjectStore("files");
       r.onsuccess = () => res(r.result);
-      r.onerror = () => rej(r.error);
+      r.onerror = () => rej(r.error ?? new Error("This browser could not open its storage."));
     });
   const tx = async <T>(mode: IDBTransactionMode, fn: (s: IDBObjectStore) => IDBRequest<T> | void): Promise<T | undefined> => {
     const db = await open();
@@ -149,15 +149,21 @@ const webStore = (): Store => {
         db.close();
         res(req ? req.result : undefined);
       };
-      t.onerror = () => rej(t.error);
+      // WebKit can fail a transaction with no error object (private storage, quota).
+      const fail = () => rej(t.error ?? req?.error ?? new Error("This browser could not save the file (its storage may be private or full)."));
+      t.onerror = fail;
+      t.onabort = fail;
     });
   };
+  // Older versions stored Blobs; WebKit can't store Blobs in private storage, so new files are ArrayBuffers.
+  type Stored = Blob | ArrayBuffer;
+  const size = (v: Stored) => (v instanceof Blob ? v.size : v.byteLength);
   return {
     async sizes(names) {
       const out: number[] = [];
       for (const n of names) {
-        const v = await tx<Blob>("readonly", (s) => s.get(n)).catch(() => undefined);
-        out.push(v ? v.size : 0);
+        const v = await tx<Stored>("readonly", (s) => s.get(n)).catch(() => undefined);
+        out.push(v ? size(v) : 0);
       }
       return out;
     },
@@ -177,12 +183,13 @@ const webStore = (): Store => {
       await this.write(f.name, concat(parts, n));
     },
     async read(name) {
-      const b = await tx<Blob>("readonly", (s) => s.get(name));
+      const b = await tx<Stored>("readonly", (s) => s.get(name));
       if (!b) throw new Error(`${name} is not downloaded`);
-      return new Uint8Array(await b.arrayBuffer());
+      return new Uint8Array(b instanceof Blob ? await b.arrayBuffer() : b);
     },
     async write(name, data) {
-      await tx("readwrite", (s) => s.put(new Blob([data as BlobPart]), name));
+      const buf = data.byteOffset === 0 && data.byteLength === data.buffer.byteLength ? data.buffer : data.slice().buffer;
+      await tx("readwrite", (s) => s.put(buf, name));
     },
     async remove(names) {
       for (const n of names) await tx("readwrite", (s) => s.delete(n));

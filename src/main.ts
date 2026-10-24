@@ -28,6 +28,11 @@ import { Workspace } from "./ui/workspace";
 import { TextSpec, rerenderTextLayers, setTextRenderer } from "./core/text";
 import { ensureFont, fontReady, nearestWeight, registerBundledFonts } from "./text/fonts";
 import { renderText } from "./text/render";
+import { offerRecovery, startRecovery } from "./ui/recovery";
+import { mountTooltips } from "./ui/tooltips";
+import { scratchPlatform } from "./io/scratchstore";
+import { showPopupMenu } from "./ui/menus";
+import * as storage from "./ui/storage";
 
 const $ = (id: string) => document.getElementById(id)!;
 
@@ -145,6 +150,13 @@ function boot(): void {
   workspace.getShortcuts = () => ({ ...shortcuts.overrides });
   workspace.onShortcuts = (s) => shortcuts.setOverrides(s);
   shortcuts.onChange = () => app.emit("tool");
+  // Preferences > Redo Key changes which keys redo.
+  let redoKey = app.prefs.redoKey;
+  app.on("prefs", () => {
+    if (app.prefs.redoKey === redoKey) return;
+    redoKey = app.prefs.redoKey;
+    shortcuts.refreshDefaults();
+  });
   app.on("screen", () => workspace.render());
   mountMenuBar($("menubar"), buildMenus(app, actions, workspace, themes, { org: filterOrg, open: actions.openFilter }));
   shortcuts.install();
@@ -197,6 +209,8 @@ function boot(): void {
   // Scripting surface: the same commands the menus use. The AI palette (M2) builds on this.
   (window as unknown as { editor: unknown }).editor = {
     app,
+    // Scratch disk and recovery storage (for scripts and tests).
+    scratch: scratchPlatform(),
     bus: app.bus,
     workspace,
     shortcuts,
@@ -225,6 +239,12 @@ function boot(): void {
         }
     });
   void openLaunched();
+  // Closing the app window (or Cmd+Q) asks about unsaved images first.
+  if (isDesktop) void watchQuit(app);
+  // Crash recovery: keep copies of changed images; offer what a crash left behind.
+  startRecovery(app);
+  mountTooltips(app);
+  void offerRecovery(app);
   // macOS: files double-clicked in Finder while the editor is running.
   if (isDesktop) void import("@tauri-apps/api/event").then(({ listen }) => listen("open-files", () => void openLaunched()));
 }
@@ -232,7 +252,36 @@ function boot(): void {
 function mountStatusBar(app: App): void {
   const zoom = el("input", { class: "zoom-field", type: "text", value: "", "aria-label": "Zoom" });
   const zoomCell = el("div", { class: "cell" }, zoom);
-  const docCell = el("div", { class: "cell", title: "Flattened size / layered size in memory" });
+  // PS7's status bar choice: what the info cell shows (the ▸ picks).
+  type InfoKind = "sizes" | "dimensions" | "scratch" | "efficiency" | "timing" | "tool";
+  const KINDS: [InfoKind, string][] = [
+    ["sizes", "Document Sizes"],
+    ["dimensions", "Document Dimensions"],
+    ["scratch", "Scratch Sizes"],
+    ["efficiency", "Efficiency"],
+    ["timing", "Timing"],
+    ["tool", "Current Tool"],
+  ];
+  let kind = storage.load<InfoKind>("statusInfo", "sizes");
+  const docText = el("span", {});
+  const pick = el("button", { type: "button", class: "status-pick", title: "Choose what this shows", "aria-label": "Status information" }, "▸");
+  const docCell = el("div", { class: "cell doc-info" }, docText, pick);
+  pick.addEventListener("click", () => {
+    const r = pick.getBoundingClientRect();
+    showPopupMenu(
+      KINDS.map(([k, label]) => ({
+        label,
+        checked: kind === k,
+        run: () => {
+          kind = k;
+          storage.save("statusInfo", k);
+          sync();
+        },
+      })),
+      r.left,
+      r.top - 8,
+    );
+  });
   const hint = el("div", { class: "cell hint" });
   const gpu = el("div", { class: "cell", title: "Time spent compositing the last change" });
   $("statusbar").append(zoomCell, docCell, hint, gpu);
@@ -247,11 +296,31 @@ function mountStatusBar(app: App): void {
   const sync = () => {
     const doc = app.doc;
     if (document.activeElement !== zoom) zoom.value = doc ? +(app.compositor.view.zoom * 100).toFixed(2) + "%" : "";
-    if (doc) {
+    const st = app.pager?.stats;
+    if (kind === "scratch") {
+      // PS7: memory used by all open images and their history / the memory they may use.
+      docText.textContent = st ? `Scratch: ${fmt(st.inMemory)}/${fmt(st.budget)}` : "Scratch: -";
+      docCell.title = st ? `${fmt(st.onDisk)} of older history is on the scratch disk` : "";
+    } else if (kind === "efficiency") {
+      const e = st && st.inMemory + st.onDisk ? Math.round((st.inMemory / (st.inMemory + st.onDisk)) * 100) : 100;
+      docText.textContent = `Efficiency: ${e}%`;
+      docCell.title = "How much of the open images and their history is in memory rather than on the scratch disk";
+    } else if (kind === "timing") {
+      const t = app.lastTiming;
+      docText.textContent = t ? `${(t.ms / 1000).toFixed(1)}s` : "-";
+      docCell.title = t ? `${t.label}: ${t.ms.toFixed(0)} ms` : "Time the last operation took";
+    } else if (kind === "tool") {
+      docText.textContent = app.baseTool.label.replace(/ Tool$/, "");
+      docCell.title = "";
+    } else if (kind === "dimensions") {
+      docText.textContent = doc ? `${doc.width} × ${doc.height} px (${doc.resolution} ppi)` : "-";
+      docCell.title = doc ? `${((doc.width / doc.resolution) * 2.54).toFixed(2)} × ${((doc.height / doc.resolution) * 2.54).toFixed(2)} cm printed` : "";
+    } else if (doc) {
       let tiles = 0;
       for (const l of doc.layers) for (const t of l.grid.tiles) if (t) tiles++;
-      docCell.textContent = `Doc: ${fmt(doc.width * doc.height * 3)}/${fmt(tiles * 256 * 256 * 4)}`;
-    } else docCell.textContent = "Doc: -";
+      docText.textContent = `Doc: ${fmt(doc.width * doc.height * 3)}/${fmt(tiles * 256 * 256 * 4)}`;
+      docCell.title = "Flattened size / layered size in memory";
+    } else docText.textContent = "Doc: -";
     hint.textContent =
       app.statusMessage ||
       (app.doc?.quickMask
@@ -265,8 +334,33 @@ function mountStatusBar(app: App): void {
   app.on("composite", () => {
     gpu.textContent = `${app.compositor.stats.lastTiles} tiles, ${app.compositor.stats.lastCompositeMs.toFixed(1)} ms`;
   });
-  for (const t of ["doc", "view", "tool", "status"] as const) app.on(t, sync);
+  for (const t of ["doc", "view", "tool", "status", "prefs"] as const) app.on(t, sync);
   sync();
+}
+
+/** Desktop: the native side asks before closing; answer, and quit once unsaved work is dealt with. */
+async function watchQuit(app: App): Promise<void> {
+  const { invoke } = await import("@tauri-apps/api/core");
+  const { listen } = await import("@tauri-apps/api/event");
+  let asking = false;
+  await listen("close-requested", async () => {
+    await invoke("close_ack");
+    if (asking) return;
+    const unsaved = app.sessions.filter((s) => app.sessionModified(s));
+    if (unsaved.length) {
+      asking = true;
+      const names = unsaved.map((s) => `"${s.doc.name}"`).join(", ");
+      const ok = await confirmDialog(
+        "Quit",
+        unsaved.length === 1 ? `${names} has unsaved changes. Quit without saving it?` : `${unsaved.length} images have unsaved changes (${names}). Quit without saving them?`,
+        "Quit Without Saving",
+      );
+      asking = false;
+      if (!ok) return;
+    }
+    await invoke("quit_app");
+  });
+  await invoke("frontend_ready");
 }
 
 boot();

@@ -1,18 +1,24 @@
-// End-to-end checks in headless Chromium (software WebGL2).
+// End-to-end checks in headless Chromium (software WebGL2), or WebKit (the
+// engine of the macOS and Linux apps) with E2E_BROWSER=webkit.
 //   npm run build && npm run e2e
-// Screenshots go to e2e/out/.
-import { chromium } from "playwright";
+// Screenshots go to e2e/out/ (e2e/out-webkit/ for WebKit).
+import { chromium, webkit } from "playwright";
 import { preview } from "vite";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 
-const out = new URL("./out/", import.meta.url).pathname;
+const engine = process.env.E2E_BROWSER === "webkit" ? "webkit" : "chromium";
+const out = new URL(engine === "webkit" ? "./out-webkit/" : "./out/", import.meta.url).pathname;
 mkdirSync(out, { recursive: true });
 
 const server = await preview({ preview: { port: 4173, strictPort: true } });
 const url = "http://localhost:4173/";
-const browser = await chromium.launch({
-  args: ["--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"],
-});
+const browser =
+  engine === "webkit"
+    ? await webkit.launch()
+    : await chromium.launch({
+        args: ["--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"],
+      });
+console.log(`(${engine})`);
 const context = await browser.newContext({ viewport: { width: 1400, height: 900 }, acceptDownloads: true });
 const page = await context.newPage();
 const errors = [];
@@ -26,6 +32,8 @@ const check = (name, ok, detail = "") => {
   if (!ok) failures++;
 };
 const ev = (fn, arg) => page.evaluate(fn, arg);
+// Wait for palettes that re-render on the next animation frame (WebKit returns from clicks before it).
+const settle = () => ev(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r()))));
 const labels = () => ev(() => window.editor.app.bus.history.states.map((s) => s.label));
 const lastLabel = async () => (await labels()).at(-1);
 
@@ -772,6 +780,7 @@ check("Ctrl+Z is ignored in the middle of a stroke", (await lastLabel()) === "Br
     app.bus.dispatch("layer.addMask", { reveal: "selection" });
     app.bus.dispatch("select.none");
   });
+  await settle();
   const maskThumb = page.locator(".layer-row.active .mask-thumb");
   check("masked layer shows a mask thumbnail", (await maskThumb.count()) === 1);
 
@@ -846,6 +855,7 @@ check("Ctrl+Z is ignored in the middle of a stroke", (await lastLabel()) === "Br
 
   // Drag the mask thumbnail to the trash: Apply / Discard / Cancel.
   await page.locator('[data-drop="trash"]').scrollIntoViewIfNeeded();
+  await settle();
   const thumbBox = await page.locator(".layer-row.active .mask-thumb").boundingBox();
   const trash = await page.locator('[data-drop="trash"]').boundingBox();
   await page.mouse.move(thumbBox.x + 5, thumbBox.y + 5);
@@ -865,6 +875,7 @@ check("Ctrl+Z is ignored in the middle of a stroke", (await lastLabel()) === "Br
     app.bus.dispatch("layer.addMask", { reveal: "all" });
     app.bus.dispatch("paint.gradient", { x0: 0, y0: 0, x1: 0, y1: 420, preset: "whiteBlack" });
   });
+  await settle();
   check("a layer set gets a mask thumbnail", (await page.locator(".layer-row.active .mask-thumb").count()) === 1);
   await page.screenshot({ path: out + "19-set-mask.png" });
 }
@@ -1105,7 +1116,7 @@ check("pan never re-blends layers", perf.pan < perf.full / 5);
     x.fill();
     app.openImage({ name: "v09.png", width: w, height: h, data: x.getImageData(0, 0, w, h).data });
     // Smaller than the window, so the transform handles aren't on its resize border.
-    app.setZoom(0.66);
+    app.setZoom(0.5);
   });
   const box = async () => ev(() => {
     const s = window.editor.app.active;
@@ -1113,7 +1124,7 @@ check("pan never re-blends layers", perf.pan < perf.full / 5);
     const r = s.win.viewport.getBoundingClientRect();
     return { x0: r.left + v.x, y0: r.top + v.y, z: v.zoom };
   });
-  const at = (b, x, y) => [b.x0 + x * b.z, b.y0 + y * b.z];
+  const at = (b, x, y) => [b.x0 + (x + 0.5) * b.z, b.y0 + (y + 0.5) * b.z];
   let b = await box();
   // Content-Aware Fill: lasso around the dark dot, Shift+Backspace.
   await page.keyboard.press("l");
@@ -1227,7 +1238,7 @@ check("pan never re-blends layers", perf.pan < perf.full / 5);
     x.fillStyle = "#cfd8e3";
     x.fillRect(0, 0, w, h);
     app.openImage({ name: "v10.png", width: w, height: h, data: x.getImageData(0, 0, w, h).data });
-    app.setZoom(0.66);
+    app.setZoom(0.5);
     for (const [n, bx, by] of [["A", 40, 40], ["B", 200, 90]]) {
       app.run("layer.new", { name: n });
       app.run("select.rect", { x: bx, y: by, w: 60, h: 60 });
@@ -1241,7 +1252,7 @@ check("pan never re-blends layers", perf.pan < perf.full / 5);
     const r = s.win.viewport.getBoundingClientRect();
     return { x0: r.left + v.x, y0: r.top + v.y, z: v.zoom };
   });
-  const at = (b, x, y) => [b.x0 + x * b.z, b.y0 + y * b.z];
+  const at = (b, x, y) => [b.x0 + (x + 0.5) * b.z, b.y0 + (y + 0.5) * b.z];
   const drag = async (b, pts) => {
     await page.mouse.move(...at(b, ...pts[0]));
     await page.mouse.down();
@@ -1265,6 +1276,7 @@ check("pan never re-blends layers", perf.pan < perf.full / 5);
   const rows = page.locator(".layer-row");
   await rows.nth(0).click();
   await rows.nth(1).click({ modifiers: ["Control"] });
+  await settle();
   const ms = await ev(() => ({ sel: window.editor.app.doc.selectedNodes.map((n) => n.name), rows: document.querySelectorAll(".layer-row.selected, .layer-row.active").length }));
   check("Ctrl-click selects several layers", ms.sel.join() === "A,B" && ms.rows === 2, JSON.stringify(ms));
   await rows.nth(0).click();
@@ -1355,6 +1367,163 @@ check("pan never re-blends layers", perf.pan < perf.full / 5);
   await ev(async () => {
     const a = window.editor.app;
     for (const s of [...a.sessions]) if (s.doc.name.startsWith("v10")) await a.closeSession(s);
+  });
+}
+
+// ======================================================= 0.11: Move tool, temporary tools, shortcuts, preferences, scratch disk
+{
+  await ev(() => {
+    const { app } = window.editor;
+    app.newDocument({ name: "v11", width: 480, height: 320, contents: "white" });
+    app.setZoom(0.5);
+    for (const [n, x] of [["A", 40], ["B", 200]]) {
+      app.run("layer.new", { name: n });
+      app.run("select.rect", { x, y: 40, w: 80, h: 80 });
+      app.run("edit.fill", { use: "black" });
+      app.run("select.none", {});
+    }
+  });
+  const box = async () => ev(() => {
+    const s = window.editor.app.active;
+    const v = s.compositor.view;
+    const r = s.win.viewport.getBoundingClientRect();
+    return { x0: r.left + v.x, y0: r.top + v.y, z: v.zoom };
+  });
+  const at = (b, x, y) => [b.x0 + (x + 0.5) * b.z, b.y0 + (y + 0.5) * b.z];
+  const drag = async (b, pts) => {
+    await page.mouse.move(...at(b, ...pts[0]));
+    await page.mouse.down();
+    for (const p of pts.slice(1)) await page.mouse.move(...at(b, ...p), { steps: 5 });
+    await page.mouse.up();
+  };
+  let b = await box();
+  const offsets = () => ev(() => window.editor.app.doc.layers.slice(1).map((l) => `${l.name}:${l.offsetX},${l.offsetY}`).join(" "));
+  // (The 0.10 checks left the Paths tab in front.)
+  await ev(() => window.editor.workspace.show("layers"));
+  // The Move tool moves the layer chosen in the Layers palette, even when clicking another layer's pixels.
+  await page.locator(".layer-row").nth(0).click();
+  await page.keyboard.press("v");
+  check("Auto-Select is Off by default", (await page.locator('select[aria-label="Auto-Select"]').inputValue()) === "off");
+  await drag(b, [[80, 80], [90, 90]]);
+  check("the Move tool moves the selected layer, not the one clicked", (await offsets()) === "A:0,0 B:10,10", await offsets());
+  await page.keyboard.down("Control");
+  await drag(b, [[80, 80], [90, 90]]);
+  await page.keyboard.up("Control");
+  check("Ctrl-dragging with the Move tool doesn't switch layers either", (await offsets()) === "A:0,0 B:20,20", await offsets());
+  await page.locator('select[aria-label="Auto-Select"]').selectOption("layer");
+  await drag(b, [[80, 80], [82, 80]]);
+  check("Auto-Select: Layer picks the layer clicked", (await ev(() => window.editor.app.doc.activeLayer.name)) === "A");
+  await page.locator('select[aria-label="Auto-Select"]').selectOption("off");
+  // Holding Alt with the Brush: the Eyedropper, then the Brush again.
+  await page.keyboard.press("b");
+  await page.keyboard.down("Alt");
+  const altTool = await ev(() => window.editor.app.tool.id);
+  await page.mouse.click(...at(b, 60, 60));
+  await page.keyboard.up("Alt");
+  const afterAlt = await ev(() => [window.editor.app.tool.id, window.editor.app.doc.foreground.slice(0, 3).join(",")]);
+  check("holding Alt with the Brush borrows the Eyedropper", altTool === "eyedropper" && afterAlt[0] === "brush" && afterAlt[1] === "0,0,0", JSON.stringify([altTool, afterAlt]));
+  // Ctrl+Space: zoom in.
+  const z0 = await ev(() => window.editor.app.compositor.view.zoom);
+  await page.keyboard.down("Control");
+  await page.keyboard.down("Space");
+  await page.mouse.click(...at(b, 240, 160));
+  await page.keyboard.up("Space");
+  await page.keyboard.up("Control");
+  const z1 = await ev(() => [window.editor.app.compositor.view.zoom, window.editor.app.tool.id]);
+  check("Ctrl+Space clicks zoom in, then the tool comes back", z1[0] > z0 && z1[1] === "brush", JSON.stringify(z1));
+  await ev(() => window.editor.app.setZoom(0.66));
+  b = await box();
+  // Layer stepping and blend mode keys.
+  await page.keyboard.press("v");
+  await page.keyboard.press("Alt+]");
+  check("Alt+] selects the layer above", (await ev(() => window.editor.app.doc.activeLayer.name)) === "B");
+  await page.keyboard.press("Alt+Shift+M");
+  check("Alt+Shift+M sets Multiply", (await ev(() => window.editor.app.doc.activeLayer.blendMode)) === "multiply");
+  await page.keyboard.press("Shift+=");
+  check("Shift+= steps to the next blend mode", (await ev(() => window.editor.app.doc.activeLayer.blendMode)) === "colorBurn");
+  await page.keyboard.press("Alt+Shift+N");
+  // Number keys: two quick digits.
+  await page.keyboard.press("b");
+  await page.keyboard.press("3");
+  await page.keyboard.press("5");
+  check("typing 3 then 5 sets 35% opacity", (await ev(() => window.editor.app.settings.brushOpacity)) === 35);
+  await page.keyboard.press("0");
+  // Transform Again.
+  await page.keyboard.press("v");
+  await ev(() => window.editor.actions.tFlipH.run());
+  await page.waitForTimeout(300);
+  await page.keyboard.press("Control+Shift+t");
+  await page.waitForTimeout(300);
+  check("Ctrl+Shift+T repeats the last transform", (await lastLabel()) === "Transform Again", await lastLabel());
+  // Preferences: change the ruler units; the Info palette and rulers follow.
+  await page.keyboard.press("Control+k");
+  await page.waitForSelector(".pf");
+  check("Ctrl+K opens Preferences at General", (await page.locator(".pf-title").textContent()) === "General");
+  await page.locator(".pf-item", { hasText: "Units & Rulers" }).click();
+  await page.locator('select[aria-label="Rulers"]').selectOption("inches");
+  await page.locator(".pf-item", { hasText: "Memory" }).click();
+  check("the Memory section shows the limit", /GB|MB/.test((await page.locator(".pf-panel").textContent()) ?? ""));
+  await page.getByRole("button", { name: "OK", exact: true }).click();
+  await page.waitForSelector(".pf", { state: "detached" });
+  check("Preferences apply on OK", (await ev(() => window.editor.app.prefs.rulerUnits)) === "inches");
+  await ev(() => window.editor.app.setPrefs({ rulerUnits: "pixels" }));
+  // The built-in Color Picker.
+  await page.locator("#toolbox .chip.fg").click();
+  await page.waitForSelector(".cp");
+  await page.locator(".cp-row", { hasText: "#" }).locator("input").fill("3366cc");
+  await page.getByRole("button", { name: "OK", exact: true }).click();
+  check("the Color Picker sets the foreground color", (await ev(() => window.editor.app.doc.foreground.slice(0, 3).join(","))) === "51,102,204");
+  // Scratch disk: squeeze the memory budget and make history; older steps page out and come back on undo.
+  const paged = await ev(async () => {
+    const a = window.editor.app;
+    // No writable browser storage here (some WebKit builds): paging is off.
+    if (!a.pager) return null;
+    a.newDocument({ name: "v11-big", width: 1600, height: 1600, contents: "white" });
+    for (let i = 0; i < 10; i++) {
+      a.run("select.rect", { x: (i * 113) % 900, y: (i * 71) % 900, w: 600, h: 600 });
+      a.run("color.set", { which: "foreground", r: i * 20, g: 255 - i * 20, b: 90 });
+      a.run("edit.fill", { use: "foreground" });
+    }
+    a.run("select.none", {});
+    const sum = () => {
+      const c = a.doc.composite();
+      let s = 0;
+      for (let k = 0; k < c.length; k += 499) s += c[k];
+      return s;
+    };
+    const h = a.bus.history;
+    const looks = [];
+    for (let i = h.states.length - 1; i >= Math.max(0, h.states.length - 8); i--) {
+      h.jump(i);
+      looks.push(sum());
+    }
+    h.jump(h.states.length - 1);
+    const total = a.memoryTotal, pct = a.prefs.memoryPercent;
+    a.memoryTotal = 100 * 1024 * 1024;
+    a.setPrefs({ memoryPercent: 10 });
+    const st = await a.pager.enforce();
+    const back = [];
+    for (let k = 0; k < 8; k++) {
+      back.push(sum());
+      await a.historyMove("back");
+    }
+    a.memoryTotal = total;
+    a.setPrefs({ memoryPercent: pct });
+    return { onDisk: st.onDisk, inMemory: st.inMemory, same: JSON.stringify(looks) === JSON.stringify(back.slice(0, looks.length)) };
+  });
+  if (paged) {
+    check("over the memory limit, older history goes to the scratch disk", paged.onDisk > 0, JSON.stringify(paged));
+    check("undo brings paged-out steps back exactly", paged.same, JSON.stringify(paged));
+  } else console.log("SKIP  scratch paging (no writable storage in this browser)");
+  await page.locator(".status-pick").click();
+  await page.getByText("Scratch Sizes", { exact: true }).click();
+  check("the status bar can show Scratch Sizes", /^Scratch: /.test((await page.locator(".doc-info span").first().textContent()) ?? ""));
+  await page.locator(".status-pick").click();
+  await page.getByText("Document Sizes", { exact: true }).click();
+  await page.screenshot({ path: out + "60-v11.png" });
+  await ev(async () => {
+    const a = window.editor.app;
+    for (const s of [...a.sessions]) if (s.doc.name.startsWith("v11")) await a.closeSession(s);
   });
 }
 

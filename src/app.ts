@@ -20,7 +20,11 @@ import { NeedsRasterizeError } from "./core/cmd/common";
 import { DecodedImage, ExportFormat, baseName, encodeImage, isDesktop, saveBlob, saveBytes } from "./io/files";
 import { decodeProjectAsync, encodeProjectAsync } from "./io/project";
 import { createTools, Tool, ToolEvent, ToolId } from "./tools/tools";
-import { DocMode, DocWindow, DocWindows } from "./ui/docwindows";
+import { DocWindow, DocWindows } from "./ui/docwindows";
+import { fromUnits, loadPrefs, type Preferences } from "./prefs";
+import { TilePager, needsLoading } from "./core/scratch";
+import { scratchPlatform, type DiskInfo } from "./io/scratchstore";
+import { writeDensity } from "./io/density";
 import * as storage from "./ui/storage";
 import { alertDialog, busyPill } from "./ui/dialogs";
 
@@ -75,6 +79,8 @@ export interface ToolSettings {
   eraserOpacity: number;
   eraserFlow: number;
   eraserMode: "brush" | "pencil" | "block";
+  /** Eraser: paint back the History palette's source instead of erasing (Alt flips it). */
+  eraserToHistory: boolean;
   bucketTolerance: number;
   bucketContiguous: boolean;
   bucketOpacity: number;
@@ -87,7 +93,10 @@ export interface ToolSettings {
   gradientTransparency: boolean;
   /** Type tool character / paragraph defaults (the color is the foreground color). */
   typeStyle: Partial<Omit<TextStyle, "color">>;
-  moveAutoSelect: boolean;
+  /** Move tool: pick the layer (or its set) under the pointer when you click. Older files stored a boolean. */
+  moveAutoSelect: AutoSelect | boolean;
+  /** Move tool: show handles around the moving layers; dragging one starts Free Transform. */
+  moveShowBounds: boolean;
   selectMode: SelectMode;
   marqueeFeather: number;
   marqueeAntiAlias: boolean;
@@ -145,6 +154,8 @@ export interface ToolSettings {
   noteColor: string;
   /** Pen tools: draw paths, or shape layers. */
   penMode: "path" | "shape";
+  /** Pen: clicking a path segment adds a point, clicking a point deletes it. */
+  penAutoAddDelete: boolean;
   /** Shape tools: new shape layer, a path, or pixels on the active layer. */
   shapeMode: "shape" | "path" | "pixels";
   shapeRadius: number;
@@ -168,49 +179,27 @@ export interface ViewOptions {
   selectionEdges: boolean;
 }
 
-export interface Preferences {
-  historyStates: number;
-  paintingCursor: "standard" | "precise" | "brushSize";
-  otherCursor: "standard" | "precise";
-  checkSize: 0 | 4 | 8 | 16;
-  checkColors: "light" | "medium" | "dark";
-  /** Layer mask overlay (rubylith) color and opacity (%). */
-  maskOverlayColor: string;
-  maskOverlayOpacity: number;
-  gridSpacing: number;
-  gridSubdivisions: number;
-  guideColor: string;
-  gridColor: string;
-  /** How documents open: in floating windows (PS7 default) or maximized. */
-  docMode: DocMode;
-  /** Free Transform corner handles keep proportions unless Shift is held (off: the reverse, as in PS7). */
-  transformProportional: boolean;
-  /** Holding Ctrl switches to the Move tool until it is released. */
-  ctrlMove: boolean;
+/** Saved tool settings over the defaults. 0.11 starts everyone with Auto-Select off (it used to be a checkbox). */
+function loadSettings(): ToolSettings {
+  const s = { ...DEFAULT_SETTINGS, ...storage.load<Partial<ToolSettings>>("toolSettings", {}) };
+  if (typeof s.moveAutoSelect === "boolean") s.moveAutoSelect = "off";
+  return s;
 }
 
-export const DEFAULT_PREFS: Preferences = {
-  historyStates: 50,
-  transformProportional: true,
-  ctrlMove: true,
-  paintingCursor: "brushSize",
-  otherCursor: "standard",
-  checkSize: 8,
-  checkColors: "light",
-  gridSpacing: 64,
-  gridSubdivisions: 4,
-  guideColor: "#4aa8ff",
-  gridColor: "#8a8a8a",
-  docMode: "floating",
-  maskOverlayColor: "#ff0000",
-  maskOverlayOpacity: 50,
-};
+export type AutoSelect = "off" | "layer" | "set";
+export type BorrowKey = "space" | "ctrl" | "alt" | "zoom";
+/** Tools that hand over to the Eyedropper while Alt is held. */
+const ALT_EYEDROPPER_TOOLS: ToolId[] = ["brush", "pencil", "bucket", "gradient", "colorReplace"];
+
+export { DEFAULT_PREFS, type Preferences } from "./prefs";
 
 export interface NewDocOptions {
   name: string;
   width: number;
   height: number;
   contents: "white" | "background" | "transparent";
+  /** Pixels per inch (default: Preferences > Units & Rulers). */
+  resolution?: number;
 }
 
 export type ScreenMode = "standard" | "fullMenu" | "full";
@@ -238,6 +227,7 @@ const DEFAULT_SETTINGS: ToolSettings = {
   eraserOpacity: 100,
   eraserFlow: 100,
   eraserMode: "brush",
+  eraserToHistory: false,
   bucketTolerance: 32,
   bucketContiguous: true,
   bucketOpacity: 100,
@@ -249,7 +239,8 @@ const DEFAULT_SETTINGS: ToolSettings = {
   gradientDither: true,
   gradientTransparency: true,
   typeStyle: {},
-  moveAutoSelect: false,
+  moveAutoSelect: "off",
+  moveShowBounds: false,
   selectMode: "replace",
   marqueeFeather: 0,
   marqueeAntiAlias: true,
@@ -304,6 +295,7 @@ const DEFAULT_SETTINGS: ToolSettings = {
   noteAuthor: "",
   noteColor: "#ffe066",
   penMode: "path",
+  penAutoAddDelete: true,
   shapeMode: "shape",
   shapeRadius: 12,
   polygonSides: 5,
@@ -333,9 +325,9 @@ export class App {
   private theme = { pasteboard: [0.75, 0.75, 0.75] as [number, number, number], checkA: [1, 1, 1] as [number, number, number], checkB: [0.8, 0.8, 0.8] as [number, number, number], checkSize: 8 };
   readonly tools: Record<ToolId, Tool>;
   tool: Tool;
-  settings: ToolSettings = { ...DEFAULT_SETTINGS, ...storage.load<Partial<ToolSettings>>("toolSettings", {}) };
+  settings: ToolSettings = loadSettings();
   view: ViewOptions = { extras: true, rulers: false, guides: true, grid: false, snap: true, lockGuides: false, selectionEdges: true, ...storage.load<Partial<ViewOptions>>("view", {}) };
-  prefs: Preferences = { ...DEFAULT_PREFS, ...storage.load<Partial<Preferences>>("prefs", {}) };
+  prefs: Preferences = loadPrefs(storage.load<Partial<Preferences>>("prefs", {}));
   screenMode: ScreenMode = "standard";
   /** The Brushes palette's preset library. */
   brushes: BrushPreset[];
@@ -358,11 +350,13 @@ export class App {
   selectionOffset: { dx: number; dy: number } | null = null;
   /** Extra overlay drawings (e.g. Face Swap marks), drawn in every image window. */
   readonly overlayPainters = new Set<(ctx: CanvasRenderingContext2D, s: Session, view: { zoom: number; x: number; y: number }) => void>();
-  private spaceHeld = false;
-  private toolBeforeSpace: Tool | null = null;
-  private ctrlHeld = false;
-  /** The tool to go back to when Ctrl is released (null when Ctrl isn't borrowing the Move tool). */
-  private toolBeforeCtrl: Tool | null = null;
+  /**
+   * Tools borrowed while a key is held (Space: Hand, Ctrl: Move, Alt: Eyedropper,
+   * Ctrl+Space: Zoom), innermost last, each with the tool to go back to.
+   */
+  private borrows: { by: BorrowKey; prev: Tool }[] = [];
+  /** Keys that borrow a tool and are down right now. */
+  private held = new Set<BorrowKey>();
   private dragging = false;
   private activeDragTool: Tool | null = null;
   private untitled = 1;
@@ -419,12 +413,141 @@ export class App {
     };
     this.tools = createTools(this);
     this.tool = this.tools.brush;
-    this.bus.onCommand(() => this.emit("doc"));
+    this.bus.onBeforeCommand(() => {
+      // A prepared command keeps the start set by run(); anything else starts now (even after a failure).
+      if (!this.preparedStart) this.opStart = performance.now();
+      this.preparedStart = false;
+    });
+    this.bus.onCommand((c) => {
+      // Timing (status bar), Beep When Done, and paging after each step.
+      const ms = this.opStart ? performance.now() - this.opStart : 0;
+      this.opStart = 0;
+      this.lastTiming = { label: c.label, ms };
+      if (ms > 2000 && this.prefs.beepWhenDone) beep();
+      this.emit("doc");
+      this.scheduleEnforce();
+    });
     this.applyPrefs();
+    this.scratchReady = this.initScratch();
     for (const t of ["settings"] as const) this.on(t, () => storage.saveSoon("toolSettings", () => this.settings));
     this.on("brushes", () => {
       storage.saveSoon("toolBrush", () => Object.fromEntries(Object.entries(this.toolBrush).map(([k, b]) => [k, presetToJSON(b)])));
     });
+  }
+
+  // ---------------- memory and scratch disks ----------------
+
+  /** Pages old history out to the scratch disk (null where there is no scratch storage). */
+  pager: TilePager | null = null;
+  /** Installed memory in bytes (an estimate until the system says, and in the browser). */
+  memoryTotal = 8 * 1024 ** 3;
+  /** The scratch disks in use, with free space, as of the last configuration. */
+  scratchDisks: DiskInfo[] = [];
+  /** The last command's name and duration (status bar: Timing). */
+  lastTiming: { label: string; ms: number } | null = null;
+  /** Settles once the scratch disks are set up (recovery waits for it). */
+  scratchReady: Promise<void> = Promise.resolve();
+  /** Setting up the scratch disk failed: no paging, no recovery copies. */
+  scratchUnavailable = false;
+  private opStart = 0;
+  private preparedStart = false;
+  private enforceTimer = 0;
+  private historyQueue: Promise<void> = Promise.resolve();
+
+  /** Bytes images and their history may use before older history goes to the scratch disk. */
+  get memoryBudget(): number {
+    return (this.memoryTotal * this.prefs.memoryPercent) / 100;
+  }
+
+  private async initScratch(): Promise<void> {
+    const p = scratchPlatform();
+    if (!p) return;
+    try {
+      this.scratchDisks = await p.configure(this.prefs.scratchDisks);
+      const bad = this.scratchDisks.filter((d) => !d.ok);
+      if (bad.length) this.toast(`Scratch disk ${bad.map((d) => `"${d.path}"`).join(", ")} can't be used (${bad[0].error ?? "unavailable"}); using the others.`);
+    } catch (e) {
+      // Without a scratch disk, history simply stays in memory (and recovery copies are off).
+      this.scratchUnavailable = true;
+      if (isDesktop) this.toast(`The scratch disk could not be set up: ${e instanceof Error ? e.message : String(e)}.`);
+      return;
+    }
+    this.memoryTotal = (await p.memory().catch(() => 0)) || this.memoryTotal;
+    this.pager = new TilePager(
+      p.store,
+      () => this.sessions.map((s) => ({ doc: s.doc, history: s.history })),
+      () => this.memoryBudget,
+    );
+    // Commands that read old states (the History Brush) can load them first.
+    this.bus.loadStates = (states) => this.pager?.ensure(states) ?? Promise.resolve();
+    this.pager.onError = (e) =>
+      this.toast(`Could not write to the scratch disk (${e instanceof Error ? e.message : String(e)}). Older history stays in memory; choose another scratch disk in Edit > Preferences > Scratch Disks.`);
+    this.scheduleEnforce();
+    this.emit("status");
+  }
+
+  /** Preferences changed the scratch disks: move to them (everything comes back into memory first). */
+  async reconfigureScratch(): Promise<void> {
+    const p = scratchPlatform();
+    if (!p || !this.pager) return;
+    this.scratchDisks = await p.configure(this.prefs.scratchDisks);
+    await this.pager.setStore(p.store);
+    this.scheduleEnforce();
+  }
+
+  /** Check memory soon (after a step, a close, a preference change); never mid-drag. */
+  scheduleEnforce(): void {
+    if (!this.pager) return;
+    clearTimeout(this.enforceTimer);
+    this.enforceTimer = window.setTimeout(() => {
+      if (this.dragging) return this.scheduleEnforce();
+      void this.pager?.enforce().then(() => this.emit("status"));
+    }, 400);
+  }
+
+  /**
+   * Go to a history state, loading it from the scratch disk first if it was
+   * paged out. Moves run one after another, in the order asked for.
+   */
+  historyJump(i: number): Promise<void> {
+    return this.historyStep(() => i);
+  }
+
+  /** Undo / redo: "toggle" is PS7's Ctrl+Z, "back" and "forward" step through the History. */
+  historyMove(kind: "toggle" | "back" | "forward"): Promise<void> {
+    return this.historyStep((h) => {
+      const back = kind === "back" || (kind === "toggle" && !(h.lastWasUndo && h.canRedo()));
+      return back ? h.index - 1 : h.index + 1;
+    }, kind);
+  }
+
+  private historyStep(target: (h: History) => number, kind?: "toggle" | "back" | "forward"): Promise<void> {
+    const go = async () => {
+      const h = this.bus.history;
+      const i = target(h);
+      const st = h.states[i];
+      if (!st || i === h.index) return;
+      if (this.pager && needsLoading(st.snapshot)) {
+        this.status("Reading from the scratch disk...");
+        document.body.classList.add("busy");
+        try {
+          await this.pager.ensure([st]);
+        } finally {
+          document.body.classList.remove("busy");
+          this.status("");
+        }
+        // Something else may have changed the history meanwhile.
+        if (this.bus.history !== h || !h.states.includes(st)) return;
+      }
+      if (kind === "toggle") h.toggle();
+      else if (kind === "back") h.undo();
+      else if (kind === "forward") h.redo();
+      else h.jump(h.states.indexOf(st));
+      this.scheduleEnforce();
+    };
+    const p = this.historyQueue.then(go, go);
+    this.historyQueue = p.catch((e: unknown) => this.toast(`Could not go to that history state: ${e instanceof Error ? e.message : String(e)}.`));
+    return this.historyQueue;
   }
 
   // ---------------- pub/sub for the UI ----------------
@@ -476,6 +599,7 @@ export class App {
 
   newDocument(o: NewDocOptions): void {
     const doc = new Document(o.width, o.height, o.name);
+    doc.resolution = o.resolution ?? this.prefs.newResolution;
     doc.foreground = [...this.colors.fg];
     doc.background = [...this.colors.bg];
     if (o.contents === "transparent") {
@@ -491,6 +615,7 @@ export class App {
 
   openImage(img: DecodedImage): void {
     const doc = new Document(img.width, img.height, img.name);
+    doc.resolution = img.resolution ?? this.prefs.newResolution;
     doc.sourceName = img.name;
     doc.foreground = [...this.colors.fg];
     doc.background = [...this.colors.bg];
@@ -551,8 +676,7 @@ export class App {
     if (i < 0) return;
     this.sessions.splice(i, 1);
     this.windows.remove(s.win);
-    // Free the GPU context right away rather than waiting for GC.
-    s.compositor.gl.getExtension("WEBGL_lose_context")?.loseContext();
+    this.retireCompositor(s.compositor);
     if (this.active === s) {
       this.active = null;
       this.preview = {};
@@ -567,6 +691,20 @@ export class App {
       }
     }
     this.emit("sessions");
+    // Its history no longer needs memory or scratch files.
+    this.scheduleEnforce();
+  }
+
+  /**
+   * Edit > Purge: free memory. "undo" clears the active image's history up to
+   * the current step, "histories" every image's, "clipboard" the clipboard.
+   */
+  purge(what: "undo" | "clipboard" | "histories" | "all"): void {
+    if (what === "clipboard" || what === "all") this.bus.clipboard = null;
+    if (what === "undo" && this.active) this.active.history.clear();
+    if (what === "histories" || what === "all") for (const s of this.sessions) s.history.clear();
+    this.emit("doc");
+    this.scheduleEnforce();
   }
 
   private rememberColors(): void {
@@ -593,6 +731,16 @@ export class App {
   }
 
   /** Open a document in a new window. */
+  /** Closed windows' compositors, kept to reuse their WebGL contexts. */
+  private spareCompositors: Compositor[] = [];
+
+  /** A window closed: keep its compositor for the next one, or free the context right away. */
+  private retireCompositor(c: Compositor): void {
+    c.recycle();
+    if (!c.gl.isContextLost() && this.spareCompositors.length < 4) this.spareCompositors.push(c);
+    else if (!c.gl.isContextLost()) c.gl.getExtension("WEBGL_lose_context")?.loseContext();
+  }
+
   private adopt(doc: Document, label: string): void {
     // Open at 100%, or zoomed out to fit the area (like PS7).
     const room = this.windows.maxContent();
@@ -600,7 +748,14 @@ export class App {
     const win = this.windows.create(doc.width * zoom, doc.height * zoom);
     let compositor: Compositor;
     try {
-      compositor = new Compositor(win.gl);
+      const spare = this.spareCompositors.pop();
+      if (spare) {
+        // Reuse a closed window's GPU context (see Compositor.recycle).
+        spare.canvas.className = win.gl.className;
+        win.gl.replaceWith(spare.canvas);
+        win.gl = spare.canvas;
+        compositor = spare;
+      } else compositor = new Compositor(win.gl);
     } catch (e) {
       this.windows.remove(win);
       this.toast("Could not open another image window: the graphics system has run out of contexts. Close some images and try again.");
@@ -611,7 +766,7 @@ export class App {
       compositor.setDocument(doc);
     } catch (e) {
       this.windows.remove(win);
-      compositor.gl.getExtension("WEBGL_lose_context")?.loseContext();
+      this.retireCompositor(compositor);
       throw e;
     }
     const history = new History(doc);
@@ -708,10 +863,15 @@ export class App {
   }
 
   /** Open a .cie project. path is its location on the desktop (for Save and Open Recent). */
-  async openProject(bytes: Uint8Array, name: string, path: string | null = null): Promise<void> {
+  /** recovered: a crash-recovery copy, which counts as unsaved. */
+  async openProject(bytes: Uint8Array, name: string, path: string | null = null, recovered = false): Promise<void> {
     const doc = await decodeProjectAsync(bytes, name);
     doc.filePath = path;
-    this.adopt(doc, "Open");
+    this.adopt(doc, recovered ? "Recovered" : "Open");
+    if (recovered && this.active) {
+      this.active.savedStateId = -1;
+      this.emit("doc");
+    }
     if (path) this.addRecent(path);
   }
 
@@ -727,7 +887,7 @@ export class App {
     const base = doc.name.replace(/\.[^.]+$/, "");
     // A small flattened preview for file browsers.
     let preview: Uint8Array | null = null;
-    try {
+    if (this.prefs.imagePreviews) try {
       const k = Math.min(1, 512 / Math.max(doc.width, doc.height));
       const w = Math.max(1, Math.round(doc.width * k)), h = Math.max(1, Math.round(doc.height * k));
       const full = s.compositor.readPixels({ x: 0, y: 0, w: doc.width, h: doc.height });
@@ -763,11 +923,11 @@ export class App {
 
   /** Recently opened or saved files (desktop paths), newest first. */
   get recentFiles(): string[] {
-    return storage.load<string[]>("recentFiles", []);
+    return storage.load<string[]>("recentFiles", []).slice(0, Math.max(1, this.prefs.recentFiles));
   }
 
   addRecent(path: string): void {
-    const list = [path, ...this.recentFiles.filter((p) => p !== path)].slice(0, 12);
+    const list = [path, ...this.recentFiles.filter((p) => p !== path)].slice(0, Math.max(1, this.prefs.recentFiles));
     storage.save("recentFiles", list);
     this.emit("recent");
   }
@@ -782,9 +942,12 @@ export class App {
     const doc = this.doc;
     if (!doc) return;
     const px = this.compositor.readPixels({ x: 0, y: 0, w: doc.width, h: doc.height });
-    const blob = await encodeImage(px, doc.width, doc.height, format, quality);
+    const plain = await encodeImage(px, doc.width, doc.height, format, quality);
+    // The resolution goes into the file, so print sizes carry over.
+    const blob = new Blob([writeDensity(new Uint8Array(await plain.arrayBuffer()), doc.resolution) as BlobPart], { type: plain.type });
     const base = doc.name.replace(/\.[^.]+$/, "");
-    const saved = await saveBlob(blob, `${base}.${format === "png" ? "png" : "jpg"}`, format);
+    const ext = format === "png" ? "png" : "jpg";
+    const saved = await saveBlob(blob, `${base}.${this.prefs.extensionCase === "upper" ? ext.toUpperCase() : ext}`, format);
     if (saved) {
       doc.name = saved;
       this.active!.savedStateId = this.bus.history.current!.id;
@@ -807,10 +970,16 @@ export class App {
       const pending = this.bus.prepare(name, params);
       if (pending) {
         this.preparing.set(doc, name);
+        // Timing (and Beep When Done) count the preparation too.
+        const started = performance.now();
         void pending.then(
           () => {
             this.preparing.delete(doc);
-            if (this.doc === doc) this.run(name, params);
+            if (this.doc !== doc) return;
+            this.opStart = started;
+            this.preparedStart = true;
+            this.run(name, params);
+            this.preparedStart = false;
           },
           (e: unknown) => {
             this.preparing.delete(doc);
@@ -895,9 +1064,12 @@ export class App {
       ys.push(...this.doc.guides.h);
     }
     if (this.view.grid) {
-      const g = this.prefs.gridSpacing;
-      xs.push(Math.round(x / g) * g);
-      ys.push(Math.round(y / g) * g);
+      // Snap to the subdivisions too, in the grid's units.
+      const P = this.prefs, d = this.doc, sub = Math.max(1, P.gridSubdivisions);
+      const gx = fromUnits(P.gridSpacing, P.gridUnits, d.resolution, P.pointsPerInch, d.width) / sub;
+      const gy = fromUnits(P.gridSpacing, P.gridUnits, d.resolution, P.pointsPerInch, d.height) / sub;
+      if (gx > 0) xs.push(Math.round(x / gx) * gx);
+      if (gy > 0) ys.push(Math.round(y / gy) * gy);
     }
     const near = (v: number, list: number[]) => {
       let best = v, d = tol;
@@ -945,6 +1117,17 @@ export class App {
     if (next) this.setZoom(next, anchor);
   }
 
+  /** Ctrl+= / Ctrl+-: zoom, and with Preferences > Keyboard Zoom Resizes Windows, fit a floating window to the image. */
+  keyboardZoom(dir: 1 | -1): void {
+    this.zoomStep(dir);
+    const s = this.active;
+    if (!s || !this.prefs.zoomResizesWindows || this.windows.mode !== "floating") return;
+    const z = s.compositor.view.zoom;
+    this.windows.sizeToContent(s.win, Math.ceil(s.doc.width * z), Math.ceil(s.doc.height * z));
+    s.compositor.resize();
+    this.centerSession(s);
+  }
+
   /**
    * Fit on Screen (Ctrl+0). In floating mode the window grows to the largest
    * size the area allows, as PS7 does; on open, never zoom above 100%.
@@ -987,6 +1170,18 @@ export class App {
     if (this.active === s) this.emit("view");
   }
 
+  /** Home / End: show the image's top-left or bottom-right corner. */
+  scrollToCorner(which: "start" | "end"): void {
+    const s = this.active;
+    if (!s) return;
+    const v = s.compositor.view;
+    v.x = which === "start" ? 0 : s.win.viewport.clientWidth - s.doc.width * v.zoom;
+    v.y = which === "start" ? 0 : s.win.viewport.clientHeight - s.doc.height * v.zoom;
+    this.clampView(s);
+    s.compositor.requestFrame();
+    this.emit("view");
+  }
+
   panBy(dx: number, dy: number): void {
     const s = this.active;
     if (!s) return;
@@ -1016,30 +1211,63 @@ export class App {
 
   // ---------------- tools ----------------
 
+  /** Caps Lock turns every cursor precise while it is on, as in Photoshop. */
+  capsLock = false;
+
+  setCapsLock(on: boolean): void {
+    if (on === this.capsLock) return;
+    this.capsLock = on;
+    this.viewport.style.cursor = this.cursorFor(this.tool);
+    this.emit("overlay");
+  }
+
+  /** The painting cursor right now (Caps Lock makes it precise). */
+  get paintingCursor(): Preferences["paintingCursor"] {
+    return this.capsLock ? "precise" : this.prefs.paintingCursor;
+  }
+
   cursorFor(t: Tool): string {
     const painting = t.id in this.toolBrush || t.id === "faceSwap";
-    if (painting) return this.prefs.paintingCursor === "brushSize" ? "none" : "crosshair";
-    if (this.prefs.otherCursor === "precise" && t.cursor !== "grab" && t.cursor !== "move") return "crosshair";
+    if (painting) return this.paintingCursor === "brushSize" ? "none" : "crosshair";
+    if ((this.prefs.otherCursor === "precise" || this.capsLock) && t.cursor !== "grab" && t.cursor !== "move") return "crosshair";
     return t.cursor;
   }
 
   /** The chosen tool, even while Space or Ctrl is borrowing the Hand or Move tool. */
   get baseTool(): Tool {
-    return this.toolBeforeCtrl ?? this.toolBeforeSpace ?? this.tool;
+    return this.borrows[0]?.prev ?? this.tool;
   }
 
   setTool(id: ToolId): void {
     if (this.dragging) return;
     // Picking a tool ends any borrowing (releasing Ctrl or Space won't switch back).
     const prev = this.baseTool;
-    this.toolBeforeCtrl = null;
-    this.toolBeforeSpace = null;
+    this.borrows = [];
     prev.deactivate?.();
     this.tool = this.tools[id];
     this.viewport.style.cursor = this.cursorFor(this.tool);
     this.emit("tool");
     this.emit("brushes");
     this.compositor.requestFrame();
+  }
+
+  /**
+   * Switch tools in the middle of a drag and give the new tool the drag
+   * (the Move tool's bounding box handles start Free Transform this way).
+   */
+  handOverDrag(id: ToolId, e: ToolEvent): void {
+    const tool = this.tools[id];
+    if (!this.dragging) {
+      if (this.tool !== tool) this.setTool(id);
+      return;
+    }
+    this.borrows = [];
+    this.tool = tool;
+    this.activeDragTool = tool;
+    this.viewport.style.cursor = this.cursorFor(tool);
+    tool.down(e);
+    this.emit("tool");
+    this.emit("overlay");
   }
 
   private toolEvent(e: PointerEvent | MouseEvent): ToolEvent {
@@ -1054,9 +1282,9 @@ export class App {
       sx,
       sy,
       shift: e.shiftKey,
-      alt: e.altKey,
-      // While Ctrl is only holding the Move tool, it isn't also a Ctrl-click.
-      ctrl: (e.ctrlKey || e.metaKey) && !this.toolBeforeCtrl,
+      // While Alt is only holding the Eyedropper, it isn't also an Alt-click (and Ctrl only holding Move isn't a Ctrl-click).
+      alt: e.altKey && this.borrows.at(-1)?.by !== "alt",
+      ctrl: (e.ctrlKey || e.metaKey) && this.borrows.at(-1)?.by !== "ctrl" && this.borrows.at(-1)?.by !== "zoom",
       button: e.button,
       detail: e.detail,
       pressure: pe.pointerType === "pen" ? pe.pressure : 1,
@@ -1098,8 +1326,8 @@ export class App {
       this.dragging = false;
       this.activeDragTool?.up(this.toolEvent(e));
       this.activeDragTool = null;
-      if (!this.spaceHeld && this.toolBeforeSpace) this.restoreFromSpace();
-      if (!this.ctrlHeld && this.toolBeforeCtrl) this.restoreFromCtrl();
+      // Keys let go of during the drag give their tools back now.
+      for (const b of [...this.borrows].reverse()) if (!this.held.has(b.by)) this.giveBack(b.by);
       this.emit("overlay");
     };
     vp.addEventListener("pointerup", end);
@@ -1119,7 +1347,11 @@ export class App {
         e.preventDefault();
         if (this.active !== s) this.activate(s);
         const r = vp.getBoundingClientRect();
-        if (e.ctrlKey || e.altKey || e.metaKey) {
+        // Preferences > Zoom with Scroll Wheel swaps the plain wheel and Alt/Ctrl+wheel.
+        const modified = e.ctrlKey || e.altKey || e.metaKey;
+        // A trackpad pinch arrives as Ctrl+wheel: always a zoom.
+        const pinch = e.ctrlKey && !e.altKey && !e.metaKey && Math.abs(e.deltaY) < 50 && !Number.isInteger(e.deltaY);
+        if (pinch || (modified !== this.prefs.zoomWithWheel && !(this.prefs.zoomWithWheel && e.shiftKey))) {
           const f = Math.exp(-e.deltaY * (e.ctrlKey && !e.altKey ? 0.01 : 0.002));
           this.setZoom(this.compositor.view.zoom * f, { sx: e.clientX - r.left, sy: e.clientY - r.top });
         } else this.panBy(-(e.shiftKey ? e.deltaY : e.deltaX), e.shiftKey ? 0 : -e.deltaY);
@@ -1133,19 +1365,49 @@ export class App {
     return this.dragging;
   }
 
+  /** Is this key held down (Space while dragging a marquee moves it)? */
+  isHeld(key: BorrowKey): boolean {
+    return this.held.has(key);
+  }
+
+  private borrow(by: BorrowKey, tool: Tool): void {
+    this.borrows.push({ by, prev: this.tool });
+    this.tool = tool;
+    this.viewport.style.cursor = this.cursorFor(tool);
+    this.emit("overlay");
+  }
+
+  /** Give a borrowed tool back. If another borrow sits on top, it will return to what this one replaced. */
+  private giveBack(by: BorrowKey): void {
+    const i = this.borrows.findIndex((b) => b.by === by);
+    if (i < 0) return;
+    const b = this.borrows[i];
+    if (i === this.borrows.length - 1) this.tool = b.prev;
+    else this.borrows[i + 1].prev = b.prev;
+    this.borrows.splice(i, 1);
+    this.viewport.style.cursor = this.cursorFor(this.tool);
+    this.emit("overlay");
+  }
+
+  private release(by: BorrowKey): void {
+    if (!this.held.delete(by)) return;
+    if (!this.dragging) this.giveBack(by);
+  }
+
+  /** Hold Space: the Hand tool. */
   holdSpace(down: boolean): void {
-    if (down && !this.spaceHeld) {
-      this.spaceHeld = true;
-      if (this.tool !== this.tools.hand && !this.dragging) {
-        this.toolBeforeSpace = this.tool;
-        this.tool = this.tools.hand;
-        this.viewport.style.cursor = this.cursorFor(this.tool);
-        this.emit("overlay");
-      }
-    } else if (!down && this.spaceHeld) {
-      this.spaceHeld = false;
-      if (!this.dragging) this.restoreFromSpace();
-    }
+    if (!down) return this.release("space");
+    if (this.held.has("space")) return;
+    this.held.add("space");
+    if (this.tool !== this.tools.hand && !this.dragging) this.borrow("space", this.tools.hand);
+  }
+
+  /** Hold Ctrl+Space (zoom in) or Ctrl+Alt+Space (zoom out): the Zoom tool. */
+  holdZoom(down: boolean): void {
+    if (!down) return this.release("zoom");
+    if (this.held.has("zoom")) return;
+    this.held.add("zoom");
+    if (this.tool !== this.tools.zoom && !this.dragging) this.borrow("zoom", this.tools.zoom);
   }
 
   /**
@@ -1154,39 +1416,29 @@ export class App {
    * being edited), nor the Hand, Zoom or Move tools.
    */
   holdCtrl(down: boolean): void {
-    if (down && !this.ctrlHeld) {
-      this.ctrlHeld = true;
-      if (!this.prefs.ctrlMove || !this.doc || this.dragging || this.toolBeforeSpace || this.toolBeforeCtrl) return;
-      const t = this.tool as Tool & { active?: boolean; editing?: boolean };
-      if (["move", "transform", "hand", "zoom", "pathSelect", "directSelect"].includes(t.id) || (t.id === "crop" && t.active) || (t.id === "type" && t.editing)) return;
-      this.toolBeforeCtrl = this.tool;
-      // The pen tools borrow Direct Selection instead, as in Photoshop.
-      const pen = ["pen", "freeformPen", "addAnchor", "deleteAnchor", "convertPoint"].includes(t.id);
-      this.tool = pen ? this.tools.directSelect : this.tools.move;
-      this.viewport.style.cursor = this.cursorFor(this.tool);
-      this.emit("overlay");
-    } else if (!down && this.ctrlHeld) {
-      this.ctrlHeld = false;
-      if (!this.dragging) this.restoreFromCtrl();
-    }
+    if (!down) return this.release("ctrl");
+    if (this.held.has("ctrl")) return;
+    this.held.add("ctrl");
+    if (!this.prefs.ctrlMove || !this.doc || this.dragging || this.borrows.length) return;
+    const t = this.tool as Tool & { active?: boolean; editing?: boolean };
+    if (["move", "transform", "hand", "zoom", "pathSelect", "directSelect"].includes(t.id) || (t.id === "crop" && t.active) || (t.id === "type" && t.editing)) return;
+    // The pen tools borrow Direct Selection instead, as in Photoshop.
+    const pen = ["pen", "freeformPen", "addAnchor", "deleteAnchor", "convertPoint"].includes(t.id);
+    this.borrow("ctrl", pen ? this.tools.directSelect : this.tools.move);
   }
 
-  private restoreFromCtrl(): void {
-    if (this.toolBeforeCtrl) {
-      this.tool = this.toolBeforeCtrl;
-      this.toolBeforeCtrl = null;
-      this.viewport.style.cursor = this.cursorFor(this.tool);
-      this.emit("overlay");
-    }
+  /** Hold Alt with a painting tool: the Eyedropper (click sets the foreground color), as in Photoshop. */
+  holdAlt(down: boolean): void {
+    if (!down) return this.release("alt");
+    if (this.held.has("alt")) return;
+    this.held.add("alt");
+    if (!this.prefs.altEyedropper || !this.doc || this.dragging || this.borrows.length) return;
+    if (ALT_EYEDROPPER_TOOLS.includes(this.tool.id)) this.borrow("alt", this.tools.eyedropper);
   }
 
-  private restoreFromSpace(): void {
-    if (this.toolBeforeSpace) {
-      this.tool = this.toolBeforeSpace;
-      this.toolBeforeSpace = null;
-      this.viewport.style.cursor = this.cursorFor(this.tool);
-      this.emit("overlay");
-    }
+  /** Let go of every held key (the window lost focus). */
+  releaseHeldKeys(): void {
+    for (const by of [...this.held]) this.release(by);
   }
 
   // ---------------- feedback ----------------
@@ -1213,7 +1465,26 @@ export class App {
     el.className = "toast";
     el.textContent = msg;
     el.setAttribute("role", "status");
-    this.viewport.parentElement!.appendChild(el);
+    // With no image open the idle viewport isn't in the page: use the document area.
+    (this.viewport.isConnected ? this.viewport.parentElement : null)?.appendChild(el) ?? this.docArea.appendChild(el);
     setTimeout(() => el.remove(), 3500);
+  }
+}
+
+/** A short, quiet tone (Preferences > Beep When Done). */
+function beep(): void {
+  try {
+    const ctx = new AudioContext();
+    const o = ctx.createOscillator();
+    const g = ctx.createGain();
+    o.frequency.value = 880;
+    g.gain.setValueAtTime(0.08, ctx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.18);
+    o.connect(g).connect(ctx.destination);
+    o.start();
+    o.stop(ctx.currentTime + 0.2);
+    o.onended = () => void ctx.close();
+  } catch {
+    /* no audio */
   }
 }

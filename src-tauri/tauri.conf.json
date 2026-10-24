@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Classic Image Editor",
-  "version": "0.10.0",
+  "version": "0.12.0",
   "identifier": "app.classicimageeditor.desktop",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -38,12 +38,36 @@
     ],
     "fileAssociations": [
       {
-        "ext": ["cie"],
+        "ext": [
+          "cie"
+        ],
         "name": "Classic Image Editor Image",
         "description": "Classic Image Editor layered image",
         "role": "Editor",
         "mimeType": "application/x-classic-image-editor"
       }
-    ]
+    ],
+    "category": "Graphics and Design",
+    "shortDescription": "A fast, offline image editor in the spirit of classic Photoshop 7",
+    "linux": {
+      "deb": {
+        "depends": [
+          "curl"
+        ],
+        "section": "graphics"
+      },
+      "rpm": {
+        "depends": [
+          "curl"
+        ]
+      },
+      "appimage": {
+        "bundleMediaFramework": false
+      }
+    },
+    "macOS": {
+      "minimumSystemVersion": "11.0",
+      "signingIdentity": "-"
+    }
   }
 }

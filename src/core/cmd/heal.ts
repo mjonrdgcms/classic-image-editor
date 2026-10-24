@@ -8,6 +8,8 @@
  * replay to the same pixels.
  */
 
+import type { HistoryState } from "../history";
+import { needsLoading } from "../scratch";
 import { CommandContext, CommandDef, ValidationError } from "../commands";
 import type { Document, Layer } from "../document";
 import { healBlend, inpaint, type InpaintInput, type InpaintOptions } from "../inpaint";
@@ -133,10 +135,16 @@ const caParams = {
 };
 
 /** The layer `id` as it was in a history state or snapshot, for the History Brush. */
-export function historySource(ctx: CommandContext, layerId: number, state: number, snapshot?: number): { grid: TileGrid; offsetX: number; offsetY: number } {
+/** The history state (or snapshot) the History Brush paints from. */
+function historySourceState(ctx: CommandContext, state: number, snapshot?: number): HistoryState | undefined {
   const h = ctx.bus.history;
-  const st = snapshot !== undefined ? h.snapshots[snapshot] : state === 0 ? (h.opened ?? h.states[0]) : h.states[Math.min(state, h.states.length - 1)];
+  return snapshot !== undefined ? h.snapshots[snapshot] : state === 0 ? (h.opened ?? h.states[0]) : h.states[Math.min(state, h.states.length - 1)];
+}
+
+export function historySource(ctx: CommandContext, layerId: number, state: number, snapshot?: number): { grid: TileGrid; offsetX: number; offsetY: number } {
+  const st = historySourceState(ctx, state, snapshot);
   if (!st) throw new ValidationError(snapshot !== undefined ? `there is no snapshot ${snapshot + 1}` : "there is no history state to paint from");
+  if (needsLoading(st.snapshot)) throw new ValidationError("that history state is on the scratch disk; go back to it in the History palette once to load it");
   for (const n of st.snapshot.stack) {
     const layers = n.kind === "layer" ? [n] : n.children;
     for (const l of layers) if (l.props.id === layerId) return { grid: l.grid, offsetX: l.props.offsetX, offsetY: l.props.offsetY };
@@ -425,6 +433,12 @@ export const healCommands: CommandDef[] = [
     },
     history: true,
     enabled: hasLayer,
+    // A History Brush source paged out to the scratch disk is loaded first.
+    prepare(ctx, p: RetouchParams) {
+      if (p.tool !== "history" && p.tool !== "artHistory") return null;
+      const st = historySourceState(ctx, p.historyState ?? 0, p.historySnapshot);
+      return st && needsLoading(st.snapshot) && ctx.bus.loadStates ? ctx.bus.loadStates([st]) : null;
+    },
     run(ctx, p: RetouchParams) {
       const l = targetLayer(ctx);
       assertPixelsEditable(l);

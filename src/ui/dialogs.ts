@@ -36,7 +36,8 @@ export function isModalOpen(): boolean {
 }
 
 /** Show a modal; resolves with the clicked button's value ("cancel" on Esc). */
-export function modal(title: string, body: HTMLElement, buttons: ModalButton[], wide = false): Promise<string> {
+/** wide: up to 640 px across, or this many pixels. */
+export function modal(title: string, body: HTMLElement, buttons: ModalButton[], wide: boolean | number = false): Promise<string> {
   return new Promise((resolve) => {
     openCount++;
     const close = (v: string) => {
@@ -56,7 +57,7 @@ export function modal(title: string, body: HTMLElement, buttons: ModalButton[], 
     x.addEventListener("click", () => close("cancel"));
     const dlg = el(
       "div",
-      { class: "dialog", role: "dialog", "aria-modal": "true", "aria-label": title, style: wide ? "max-width:640px" : "" },
+      { class: "dialog", role: "dialog", "aria-modal": "true", "aria-label": title, style: wide ? `max-width:min(${typeof wide === "number" ? wide : 640}px, 96vw)` : "" },
       el("div", { class: "caption" }, el("span", { text: title }), x),
       el("div", { class: "content" }, el("div", { class: "form" }, body), btnCol),
     );
@@ -152,7 +153,7 @@ export async function confirmDialog(title: string, message: string, ok = "OK"): 
   ])) === "ok";
 }
 
-const PRESETS: { label: string; w: number; h: number }[] = [
+const PRESETS: { label: string; w: number; h: number; res?: number }[] = [
   { label: "Custom", w: 0, h: 0 },
   { label: "640 x 480", w: 640, h: 480 },
   { label: "800 x 600", w: 800, h: 600 },
@@ -160,12 +161,12 @@ const PRESETS: { label: string; w: number; h: number }[] = [
   { label: "1920 x 1080", w: 1920, h: 1080 },
   { label: "2560 x 1440", w: 2560, h: 1440 },
   { label: "3840 x 2160 (4K)", w: 3840, h: 2160 },
-  { label: "Letter, 300 ppi (2550 x 3300)", w: 2550, h: 3300 },
-  { label: "A4, 300 ppi (2480 x 3508)", w: 2480, h: 3508 },
-  { label: "4 x 6 photo, 300 ppi (1800 x 1200)", w: 1800, h: 1200 },
+  { label: "Letter, 300 ppi (2550 x 3300)", w: 2550, h: 3300, res: 300 },
+  { label: "A4, 300 ppi (2480 x 3508)", w: 2480, h: 3508, res: 300 },
+  { label: "4 x 6 photo, 300 ppi (1800 x 1200)", w: 1800, h: 1200, res: 300 },
 ];
 
-let lastNew = { w: 800, h: 600, contents: "white" as NewDocOptions["contents"] };
+let lastNew = { w: 800, h: 600, contents: "white" as NewDocOptions["contents"], res: 0 };
 
 export async function newDocumentDialog(app: App): Promise<NewDocOptions | null> {
   const name = el("input", { type: "text", value: app.nextUntitledName() });
@@ -178,11 +179,13 @@ export async function newDocumentDialog(app: App): Promise<NewDocOptions | null>
     preset.value = p ? p.label : "Custom";
   };
   match();
+  const resolution = el("input", { type: "number", min: 1, max: 30000, step: "any", value: lastNew.res || app.prefs.newResolution, "aria-label": "Resolution" });
   preset.addEventListener("change", () => {
     const p = PRESETS.find((p) => p.label === preset.value);
     if (p && p.w) {
       width.value = String(p.w);
       height.value = String(p.h);
+      resolution.value = String(p.res ?? app.prefs.newResolution);
     }
   });
   width.addEventListener("input", match);
@@ -221,6 +224,7 @@ export async function newDocumentDialog(app: App): Promise<NewDocOptions | null>
       el("div", { class: "field-row", style: "margin:4px 0" }, el("label", { text: "Preset Sizes:" }), preset),
       el("div", { class: "field-row", style: "margin:4px 0" }, el("label", { text: "Width:" }), el("span", {}, width, " pixels")),
       el("div", { class: "field-row", style: "margin:4px 0" }, el("label", { text: "Height:" }), el("span", {}, height, " pixels")),
+      el("div", { class: "field-row", style: "margin:4px 0" }, el("label", { text: "Resolution:" }), el("span", {}, resolution, " pixels/inch")),
       el("div", { class: "field-row", style: "margin:4px 0" }, el("label", { text: "Mode:" }), el("span", { text: "RGB Color, 8 bits/channel" })),
     ),
     contents,
@@ -238,14 +242,15 @@ export async function newDocumentDialog(app: App): Promise<NewDocOptions | null>
     return null;
   }
   const c = (body.querySelector('input[name="contents"]:checked') as HTMLInputElement).value as NewDocOptions["contents"];
-  lastNew = { w, h, contents: c };
-  return { name: name.value.trim() || app.nextUntitledName(), width: w, height: h, contents: c };
+  const res = Math.max(1, Math.min(30000, +resolution.value || app.prefs.newResolution));
+  lastNew = { w, h, contents: c, res: res === app.prefs.newResolution ? 0 : res };
+  return { name: name.value.trim() || app.nextUntitledName(), width: w, height: h, contents: c, resolution: res };
 }
 
-/** PS7-style JPEG Options: quality 0-12. Returns 0..1, or null if cancelled. */
-export async function jpegOptionsDialog(): Promise<number | null> {
-  const q = el("input", { type: "range", min: 0, max: 12, step: 1, value: 10, style: "width:180px" });
-  const n = el("input", { type: "number", min: 0, max: 12, value: 10 });
+/** PS7-style JPEG Options: quality 0-12 (start: Preferences > File Handling). Returns 0..1, or null if cancelled. */
+export async function jpegOptionsDialog(start = 10): Promise<number | null> {
+  const q = el("input", { type: "range", min: 0, max: 12, step: 1, value: start, style: "width:180px" });
+  const n = el("input", { type: "number", min: 0, max: 12, value: start });
   const label = el("span", { text: "Maximum" });
   const name = (v: number) => (v <= 4 ? "Low" : v <= 7 ? "Medium" : v <= 9 ? "High" : "Maximum");
   const sync = (v: number) => {
@@ -255,7 +260,7 @@ export async function jpegOptionsDialog(): Promise<number | null> {
   };
   q.addEventListener("input", () => sync(+q.value));
   n.addEventListener("input", () => sync(Math.max(0, Math.min(12, +n.value || 0))));
-  sync(10);
+  sync(start);
   const body = el(
     "fieldset",
     {},
@@ -316,7 +321,7 @@ export async function aboutDialog(): Promise<void> {
   const body = el(
     "div",
     {},
-    el("p", {}, el("b", { text: "Classic Image Editor" }), " 0.10.0 (Core editing, filters, Black & White Lab, Actions, layer masks, type, Liquify, people selection, face swap, layered .cie files, Free Transform, Levels & Curves, retouching tools, Content-Aware Fill, layer styles, multi-layer selection, shapes and paths, the full PS7 toolbox)"),
+    el("p", {}, el("b", { text: "Classic Image Editor" }), " 0.11.0 (Core editing, filters, Black & White Lab, Actions, layer masks, type, Liquify, people selection, face swap, layered .cie files, Free Transform, Levels & Curves, retouching tools, Content-Aware Fill, layer styles, multi-layer selection, shapes and paths, the full PS7 toolbox, PS7 keyboard shortcuts, Preferences, scratch disks and crash recovery)"),
     el("p", {
       text: "A fast, offline image editor in the spirit of the classic early-2000s workflow, with a local AI assistant (via Ollama) on the way.",
     }),

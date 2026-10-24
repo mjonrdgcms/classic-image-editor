@@ -7,16 +7,39 @@
  * share one frozen constant tile, so Select All on a huge image is cheap.
  */
 
-import { Rect, TILE, TILE_PX, rectIntersect } from "./tiles";
+import { EvictedTileError, Rect, TILE, TILE_PX, rectIntersect, type SwapRef } from "./tiles";
 
 let nextVersion = 1;
 
 export class MaskTile {
-  data: Uint8Array;
+  /** null while on the scratch disk (see TilePager). */
+  private bytes: Uint8Array | null;
   frozen = false;
   version = nextVersion++;
+  /** A copy on the scratch disk (kept after loading back, since frozen tiles never change). */
+  swap: SwapRef | null = null;
+  /** The shared all-0 / all-255 tiles never leave memory. */
+  pinned = false;
   constructor(data?: Uint8Array) {
-    this.data = data ?? new Uint8Array(TILE_PX);
+    this.bytes = data ?? new Uint8Array(TILE_PX);
+  }
+  get data(): Uint8Array {
+    const d = this.bytes;
+    if (!d) throw new EvictedTileError();
+    return d;
+  }
+  set data(d: Uint8Array) {
+    this.bytes = d;
+  }
+  get resident(): boolean {
+    return this.bytes !== null;
+  }
+  evict(): void {
+    if (!this.swap || !this.frozen || this.pinned) throw new Error("this mask tile can't be evicted");
+    this.bytes = null;
+  }
+  load(d: Uint8Array): void {
+    this.bytes = d;
   }
   clone(): MaskTile {
     return new MaskTile(new Uint8Array(this.data));
@@ -36,8 +59,8 @@ export class MaskTile {
 
 /** Shared constant tiles (never written: frozen). */
 const CONST: Record<0 | 255, MaskTile> = {
-  0: Object.assign(new MaskTile(), { frozen: true }),
-  255: Object.assign(new MaskTile(new Uint8Array(TILE_PX).fill(255)), { frozen: true }),
+  0: Object.assign(new MaskTile(), { frozen: true, pinned: true }),
+  255: Object.assign(new MaskTile(new Uint8Array(TILE_PX).fill(255)), { frozen: true, pinned: true }),
 };
 
 export class Mask {

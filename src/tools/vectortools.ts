@@ -103,7 +103,8 @@ export function makeVectorTools(app: App): Record<string, Tool> {
   /** A live edit shown instead of the committed path while dragging. */
   let live: VecPath | null = null;
   /** The pen's subpath in progress, and the rubber band end. */
-  let pen: { sub: Subpath; target: Target; dragging: boolean; doc: unknown } | null = null;
+  /** The path being drawn; replace: the subpath it continues (an open path's end point was clicked). */
+  let pen: { sub: Subpath; target: Target; dragging: boolean; doc: unknown; replace?: number } | null = null;
   let rubber: [number, number] | null = null;
   /** Selected subpaths (Path Selection) and the selected anchor (Direct Selection). */
   let selSubs = new Set<number>();
@@ -263,7 +264,8 @@ export function makeVectorTools(app: App): Record<string, Tool> {
       return repaint();
     }
     const path = clonePath(p.target.path);
-    path.subpaths.push(sub);
+    if (p.replace !== undefined && p.replace < path.subpaths.length) path.subpaths[p.replace] = sub;
+    else path.subpaths.push(sub);
     commit(app, p.target, path);
     repaint();
   };
@@ -273,18 +275,44 @@ export function makeVectorTools(app: App): Record<string, Tool> {
     const a = Math.round(Math.atan2(dy, dx) / (Math.PI / 4)) * (Math.PI / 4), d = Math.hypot(dx, dy);
     return [from.x + Math.cos(a) * d, from.y + Math.sin(a) * d];
   };
+  /** A tool the Pen hands one click to (Alt: Convert Point). */
+  let penDelegate: Tool | null = null;
   const penTool: Tool = {
     id: "pen",
     label: "Pen Tool",
     shortcut: "P",
     icon: "pen",
     cursor: "crosshair",
-    hint: "Click for corner points, drag for curves. Click the first point to close; Enter or Esc ends an open path. Ctrl switches to Direct Selection.",
+    hint: "Click for corner points, drag for curves. Click the first point to close; Enter or Esc ends an open path. Ctrl: Direct Selection; Alt over a point: Convert Point.",
     down(e) {
       const t = targetPath(app, app.settings.penMode === "path");
       if (!t) return;
       if (pen && pen.doc !== app.doc) pen = null;
-      if (!pen) pen = { sub: { closed: false, pts: [] }, target: t, dragging: false, doc: app.doc };
+      if (!pen) {
+        // Alt over an anchor: Convert Point, for this click.
+        if (e.alt && anchorAt(t.path, e)?.part === "anchor") {
+          penDelegate = convertPoint;
+          return convertPoint.down({ ...e, alt: false });
+        }
+        // Clicking an end point of an open path continues it (as in Photoshop).
+        const hit = anchorAt(t.path, e);
+        const open = hit && hit.part === "anchor" && !t.path.subpaths[hit.sub].closed ? t.path.subpaths[hit.sub] : null;
+        if (open && hit && (hit.pt === 0 || hit.pt === open.pts.length - 1)) {
+          const pts = open.pts.map((a) => ({ ...a }));
+          // Continue from the end: reverse if the first point was clicked (handles swap too).
+          const sub = { closed: false, pts: hit.pt === 0 ? pts.reverse().map((a) => ({ ...a, ix: a.ox, iy: a.oy, ox: a.ix, oy: a.iy })) : pts };
+          pen = { sub, target: t, dragging: false, doc: app.doc, replace: hit.sub };
+          repaint();
+          return;
+        }
+        // Auto Add/Delete: on an anchor removes it, on a segment adds one.
+        if (app.settings.penAutoAddDelete && t.path.subpaths.length) {
+          if (hit?.part === "anchor") return deleteAnchor.down({ ...e, alt: false });
+          const n = nearestOnPath(t.path, e.x, e.y);
+          if (n && n.d * z() <= 4) return addAnchor.down({ ...e, alt: false });
+        }
+        pen = { sub: { closed: false, pts: [] }, target: t, dragging: false, doc: app.doc };
+      }
       const sub = pen.sub;
       if (sub.pts.length >= 2 && near(sub.pts[0].x, sub.pts[0].y, e, 7)) return finishPen(true);
       const [x, y] = constrain(sub.pts[sub.pts.length - 1], e);
@@ -293,6 +321,7 @@ export function makeVectorTools(app: App): Record<string, Tool> {
       repaint();
     },
     move(e) {
+      if (penDelegate) return penDelegate.move(e);
       if (!pen || !pen.dragging) return;
       const a = pen.sub.pts[pen.sub.pts.length - 1];
       // Dragging pulls out symmetric handles (Alt breaks the in-handle free).
@@ -309,7 +338,12 @@ export function makeVectorTools(app: App): Record<string, Tool> {
       rubber = constrain(pen.sub.pts[pen.sub.pts.length - 1], e);
       repaint();
     },
-    up() {
+    up(e) {
+      if (penDelegate) {
+        const d = penDelegate;
+        penDelegate = null;
+        return d.up(e);
+      }
       if (pen) pen.dragging = false;
     },
     dblclick() {
@@ -379,8 +413,9 @@ export function makeVectorTools(app: App): Record<string, Tool> {
     shortcut: "P",
     icon: "addAnchor",
     cursor: "crosshair",
-    hint: "Click a path segment to add an anchor point there.",
+    hint: "Click a path segment to add an anchor point there (Alt: delete a point instead).",
     down(e) {
+      if (e.alt) return deleteAnchor.down({ ...e, alt: false });
       const t = targetPath(app);
       if (!t) return;
       const n = nearestOnPath(t.path, e.x, e.y);
@@ -399,8 +434,9 @@ export function makeVectorTools(app: App): Record<string, Tool> {
     shortcut: "P",
     icon: "deleteAnchor",
     cursor: "crosshair",
-    hint: "Click an anchor point to remove it.",
+    hint: "Click an anchor point to remove it (Alt: add a point instead).",
     down(e) {
+      if (e.alt) return addAnchor.down({ ...e, alt: false });
       const t = targetPath(app);
       if (!t) return;
       selAnchor = null;

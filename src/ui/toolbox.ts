@@ -4,6 +4,7 @@
  * Shift+shortcut to cycle. Tools from later milestones show greyed out.
  */
 
+import { pickDocColor } from "./colorpicker";
 import type { App } from "../app";
 import type { ToolId } from "../tools/tools";
 import { el } from "./dialogs";
@@ -86,6 +87,12 @@ export function mountToolbox(root: HTMLElement, app: App, keyFor: (id: ToolId) =
         e.preventDefault();
         if (flyout) openFlyout();
       });
+      // PS7: double-click the Hand tool to fit the image on screen, the Zoom tool for 100%.
+      b.addEventListener("dblclick", () => {
+        if (!app.hasDoc) return;
+        if (entry.shown === "hand") app.fitOnScreen();
+        else if (entry.shown === "zoom") app.actualPixels();
+      });
       grid.append(b);
     }
   }
@@ -99,19 +106,7 @@ export function mountToolbox(root: HTMLElement, app: App, keyFor: (id: ToolId) =
   swap.addEventListener("click", () => app.run("color.swap"));
   const reset = el("button", { class: "mini reset", type: "button", title: "Default Foreground and Background Colors (D)" });
   reset.addEventListener("click", () => app.run("color.reset"));
-  const pickColor = (which: "foreground" | "background") => {
-    if (!app.doc) return;
-    const c = which === "foreground" ? app.doc.foreground : app.doc.background;
-    const input = el("input", { type: "color", value: hex(c) });
-    input.style.cssText = "position:fixed;left:-100px;opacity:0";
-    document.body.append(input);
-    input.addEventListener("input", () => {
-      const v = input.value;
-      app.run("color.set", { which, r: parseInt(v.slice(1, 3), 16), g: parseInt(v.slice(3, 5), 16), b: parseInt(v.slice(5, 7), 16) });
-    });
-    input.addEventListener("change", () => input.remove());
-    input.click();
-  };
+  const pickColor = (which: "foreground" | "background") => void pickDocColor(app, which);
   fg.addEventListener("click", () => pickColor("foreground"));
   bg.addEventListener("click", () => pickColor("background"));
   root.append(el("div", { class: "swatches" }, fg, bg, swap, reset), el("div", { class: "tool-sep" }));

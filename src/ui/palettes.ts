@@ -4,6 +4,9 @@
  * Workspace decides where each one lives.
  */
 
+import { pickDocColor } from "./colorpicker";
+import { UNIT_SHORT, formatLength } from "../prefs";
+import { needsLoading } from "../core/scratch";
 import { pathsPalette } from "./pathspalette";
 import { samplerValues } from "../tools/moretools";
 import { layerStyleDialog, stylesPalette } from "./styledialog";
@@ -170,6 +173,11 @@ function info(app: App): HTMLElement {
     k("W:"), W, k("H:"), H,
   );
   const samplers = el("div", { class: "info-samplers" });
+  // Lengths in the ruler units (Preferences > Units & Rulers).
+  const len = (px: number, full: number) => {
+    const P = app.prefs;
+    return formatLength(px, P.rulerUnits, app.doc?.resolution ?? 72, P.pointsPerInch, full) + (P.rulerUnits === "pixels" ? "" : " " + UNIT_SHORT[P.rulerUnits]);
+  };
   const update = throttle(() => {
     const doc = app.doc;
     const p = app.pointer;
@@ -180,14 +188,14 @@ function info(app: App): HTMLElement {
       G.textContent = String(px[1]);
       B.textContent = String(px[2]);
       A.textContent = Math.round((px[3] / 255) * 100) + "%";
-      X.textContent = String(Math.floor(p!.x));
-      Y.textContent = String(Math.floor(p!.y));
+      X.textContent = len(Math.floor(p!.x), doc!.width);
+      Y.textContent = len(Math.floor(p!.y), doc!.height);
     } else {
       for (const n of [R, G, B, A, X, Y]) n.textContent = "";
     }
     const r = app.preview.rect ?? app.preview.crop ?? doc?.selection?.bounds() ?? null;
-    W.textContent = r ? String(Math.round(r.w)) : "";
-    H.textContent = r ? String(Math.round(r.h)) : "";
+    W.textContent = r && doc ? len(Math.round(r.w), doc.width) : "";
+    H.textContent = r && doc ? len(Math.round(r.h), doc.height) : "";
     // Color Sampler readouts.
     samplers.textContent = "";
     for (const sv of samplerValues(app))
@@ -196,6 +204,7 @@ function info(app: App): HTMLElement {
   app.on("pointer", update);
   app.on("doc", update);
   app.on("overlay", update);
+  app.on("prefs", update);
   return el("div", {}, grid, samplers);
 }
 
@@ -213,6 +222,9 @@ function color(app: App): HTMLElement {
     editing = "background";
     sync();
   });
+  // Double-click a chip for the Color Picker.
+  fg.addEventListener("dblclick", () => void pickDocColor(app, "foreground"));
+  bg.addEventListener("dblclick", () => void pickDocColor(app, "background"));
   const hexField = el("input", { type: "text", value: "#000000", style: "width:66px", "aria-label": "Hex color" });
   const rows = (["R", "G", "B"] as const).map((ch, i) => {
     const r = el("input", { type: "range", min: 0, max: 255, value: 0, "aria-label": ch });
@@ -248,9 +260,10 @@ function color(app: App): HTMLElement {
     rows.forEach(({ r, n }, i) => {
       r.value = String(c[i]);
       if (document.activeElement !== n) n.value = String(c[i]);
-      // Gradient track showing where this channel goes.
-      const lo = [...c];
-      const hiC = [...c];
+      // Gradient track showing where this channel goes (Preferences > Dynamic Color Sliders; off: plain channel ramps).
+      const dyn = app.prefs.dynamicColorSliders;
+      const lo = dyn ? [...c] : [0, 0, 0];
+      const hiC = dyn ? [...c] : [0, 0, 0];
       lo[i] = 0;
       hiC[i] = 255;
       r.style.background = `linear-gradient(90deg, ${hex(lo)}, ${hex(hiC)})`;
@@ -259,6 +272,7 @@ function color(app: App): HTMLElement {
   };
   app.on("settings", sync);
   app.on("doc", sync);
+  app.on("prefs", sync);
   sync();
   return el(
     "div",
@@ -314,18 +328,21 @@ function history(app: App, actions: Actions): PaletteParts {
         { class: "history-row" + (i === h.index ? " current" : i > h.index ? " future" : ""), role: "option", "aria-selected": i === h.index },
         el("span", { class: "dot" }),
         el("span", { text: s.label }),
+        app.pager && needsLoading(s.snapshot) ? el("span", { class: "on-disk", title: "On the scratch disk: loads when you go back to it", text: "⛁" }) : null,
       );
-      row.addEventListener("click", () => h.jump(i));
+      row.addEventListener("click", () => void app.historyJump(i));
       list.append(row);
     });
     list.querySelector(".current")?.scrollIntoView({ block: "nearest" });
   });
   app.on("doc", render);
+  // Paging to the scratch disk reports through "status".
+  app.on("status", render);
   const footer = el(
     "div",
     { style: "display:contents" },
     iconButton("newLayer", "Create new snapshot", () => app.hasDoc && app.bus.history.addSnapshot()),
-    iconButton("trash", "Step Backward", () => app.hasDoc && app.bus.history.undo()),
+    iconButton("trash", "Step Backward", () => app.hasDoc && void app.historyMove("back")),
   );
   const menu = (): MenuItem[] => [
     actions.stepForward,

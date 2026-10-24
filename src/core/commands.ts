@@ -9,6 +9,7 @@
  */
 
 import type { ClipboardImage } from "./cmd/edit";
+import type { HistoryState } from "./history";
 import type { Document } from "./document";
 import { History } from "./history";
 
@@ -130,6 +131,8 @@ export class CommandBus {
   history: History;
   /** Internal clipboard (pixels). The UI mirrors it to the system clipboard. */
   clipboard: ClipboardImage | null = null;
+  /** Loads history states paged out to the scratch disk (set by the app when paging is on). */
+  loadStates: ((states: HistoryState[]) => Promise<void>) | null = null;
   private clipListeners = new Set<(c: ClipboardImage) => void>();
 
   constructor(doc: Document) {

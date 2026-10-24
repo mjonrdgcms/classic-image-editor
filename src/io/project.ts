@@ -46,6 +46,8 @@ interface DocJson {
   format: string;
   version: number;
   app: string;
+  /** Pixels per inch (since 0.11). */
+  resolution?: number;
   width: number;
   height: number;
   activeId: number;
@@ -130,6 +132,7 @@ function projectFiles(doc: Document, preview?: Uint8Array | null): Record<string
     version: VERSION,
     app: "Classic Image Editor",
     width: doc.width,
+    resolution: doc.resolution,
     height: doc.height,
     activeId: doc.activeLayerId,
     guides: { h: [...doc.guides.h], v: [...doc.guides.v] },
@@ -195,6 +198,7 @@ function projectFromFiles(files: Record<string, Uint8Array>, name: string): Docu
     return l;
   };
   const doc = new Document(json.width, json.height, name);
+  if (typeof json.resolution === "number" && json.resolution > 0) doc.resolution = json.resolution;
   doc.stack = json.stack.map((nj): Node => {
     if (nj.kind === "layer") return readLayer(nj);
     const g = new Group(nj.props.name);

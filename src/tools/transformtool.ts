@@ -256,7 +256,9 @@ export function commitTransform(app: App): void {
   if (!quadOk(t.quad)) return app.toast("Could not apply the transform: the shape is folded over itself.");
   if (app.active !== t.session) app.activate(t.session);
   const quad = t.quad.map((v) => Math.round(v * 1000) / 1000);
-  const method = storage.load("transformMethod", "bicubic");
+  const method = transformMethod(app);
+  // Remembered for Edit > Transform > Again (Ctrl+Shift+T).
+  lastTransform = { target: t.target, rect: { ...t.rect }, quad: [...t.quad] as Quad };
   if (t.target === "selection") app.run("select.transform", { rect: t.rect, quad });
   else if (l && t.others.length) {
     const ids = [l.id, ...t.others.map((o) => o.id)];
@@ -268,6 +270,71 @@ export function commitTransform(app: App): void {
       app.toast(`Could not complete Free Transform: ${e instanceof Error ? e.message : String(e)}.`);
     }
   } else if (l) app.run("layer.transform", { id: l.id, rect: t.rect, quad, selected: t.selected, method });
+}
+
+/** The last applied Free Transform, as a canvas mapping. */
+let lastTransform: { target: Target; rect: Rect; quad: Quad } | null = null;
+
+export function hasLastTransform(): boolean {
+  return !!lastTransform;
+}
+
+/** The interpolation for transforms (the options bar's choice, which follows the Preferences default). */
+export function transformMethod(app: App): string {
+  return storage.load("transformMethod", app.prefs.interpolation);
+}
+
+/**
+ * Edit > Transform > Again: repeat the last transform's exact mapping on what
+ * would be transformed now (the selection outline, the selected pixels, or
+ * the layers), as Photoshop does.
+ */
+export async function transformAgain(app: App): Promise<void> {
+  const doc = app.doc;
+  const last = lastTransform;
+  if (!doc || st) return;
+  if (!last) return app.toast("There is no transform to repeat yet.");
+  const M = squareToQuad(last.quad);
+  const R = last.rect;
+  const f = (x: number, y: number) => apply3(M, (x - R.x) / R.w, (y - R.y) / R.h);
+  const mapRect = (r: Rect) => {
+    const c = rectQuad(r);
+    const out: number[] = [];
+    for (let i = 0; i < 8; i += 2) out.push(...f(c[i], c[i + 1]));
+    return out.map((v) => Math.round(v * 1000) / 1000) as Quad;
+  };
+  if (last.target === "selection") {
+    const b = doc.selection?.bounds();
+    if (!b) return app.toast("There is no selection to transform.");
+    const quad = mapRect(b);
+    if (!quadOk(quad)) return;
+    app.run("select.transform", { rect: b, quad });
+    return;
+  }
+  if (!doc.activeLayer) return app.toast("Select a layer to transform.");
+  if (!(await app.readyForPixels(true, !doc.selection))) return;
+  const l = doc.activeLayer;
+  const method = transformMethod(app);
+  if (doc.selection) {
+    const b = doc.selection.bounds();
+    if (b) app.run("layer.transform", { id: l.id, rect: b, quad: mapRect(b), selected: true, method });
+    return;
+  }
+  const layers = doc.selectedLayers.filter((x) => x.visible && !x.isBackground && !x.text && !x.locks.position && !x.locks.pixels);
+  if (!layers.includes(l)) layers.push(l);
+  let rect: Rect | null = null;
+  for (const x of layers) rect = rectUnion(rect, contentBounds(x));
+  if (!rect) return app.toast("There is nothing on this layer to transform.");
+  const quad = mapRect(rect);
+  if (!quadOk(quad)) return app.toast("Could not apply the transform: the shape is folded over itself.");
+  const r = rect;
+  try {
+    app.bus.group("Transform Again", () => {
+      for (const x of layers) app.bus.dispatch("layer.transform", { id: x.id, rect: r, quad, selected: false, method });
+    });
+  } catch (e) {
+    app.toast(`Could not transform again: ${e instanceof Error ? e.message : String(e)}.`);
+  }
 }
 
 export function cancelTransform(app: App): void {
@@ -677,7 +744,7 @@ export function transformOptionParts(app: App): Part[] {
   for (const k of Object.keys(fields) as (keyof typeof fields)[]) fields[k].addEventListener("change", () => apply(k));
   const method = el("select", { "aria-label": "Interpolation" });
   for (const [v, l] of [["bicubic", "Bicubic"], ["bilinear", "Bilinear"], ["nearest", "Nearest Neighbor"]]) method.append(el("option", { value: v, text: l }));
-  method.value = storage.load("transformMethod", "bicubic");
+  method.value = transformMethod(app);
   method.addEventListener("change", () => storage.save("transformMethod", method.value));
   const ok = el("button", { type: "button", class: "btn small", text: "✓ Apply", title: "Apply the transform (Enter)" });
   const cancel = el("button", { type: "button", class: "btn small", text: "✕ Cancel", title: "Cancel (Esc)" });

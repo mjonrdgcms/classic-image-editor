@@ -340,7 +340,7 @@ interface ToolPreset {
 const PRESET_KEYS: Record<string, string[]> = {
   brush: ["brushOpacity", "brushFlow", "brushMode"],
   pencil: ["pencilOpacity", "pencilMode", "pencilAutoErase"],
-  eraser: ["eraserOpacity", "eraserFlow", "eraserMode"],
+  eraser: ["eraserOpacity", "eraserFlow", "eraserMode", "eraserToHistory"],
   bucket: ["bucketTolerance", "bucketContiguous", "bucketOpacity"],
   type: ["typeStyle"],
   gradient: ["gradientType", "gradientPreset", "gradientMode", "gradientOpacity", "gradientReverse", "gradientDither", "gradientTransparency"],
@@ -350,7 +350,7 @@ const PRESET_KEYS: Record<string, string[]> = {
   polyLasso: ["lassoFeather", "lassoAntiAlias"],
   wand: ["wandTolerance", "wandAntiAlias", "wandContiguous", "wandSampleMerged"],
   eyedropper: ["eyedropperSample"],
-  move: ["moveAutoSelect"],
+  move: ["moveAutoSelect", "moveShowBounds"],
 };
 
 export function toolPresetsStore(app: App) {

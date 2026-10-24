@@ -53,21 +53,31 @@ export function canonical(s: string): string {
 const isModifierKey = (e: KeyboardEvent) => ["Control", "Shift", "Alt", "Meta"].includes(e.key);
 
 /** Categories for the editor and the reference. */
+const BLEND_IDS = ["normal", "dissolve", "darken", "multiply", "colorBurn", "linearBurn", "lighten", "screen", "colorDodge", "linearDodge", "overlay", "softLight", "hardLight", "vividLight", "linearLight", "pinLight", "difference", "exclusion", "hue", "saturation", "color", "luminosity", "behind", "clear"].map((m) => `blend_${m}`);
 const CATEGORIES: [string, string[]][] = [
   ["File", ["new", "open", "close", "closeAll", "savePng", "saveJpeg", "batch"]],
-  ["Edit", ["undo", "stepForward", "stepBackward", "cut", "copy", "copyMerged", "paste", "pasteInto", "clear", "fill", "fillFg", "fillBg", "defineBrush", "keyboardShortcuts", "preferences"]],
-  ["Image", ["cropToSelection", "invert", "desaturate", "hueSaturation", "brightnessContrast", "autoLevels", "autoContrast", "equalize", "threshold", "posterize", "gradientMap", "channelMixer", "shadowsHighlights", "exposure", "whiteBalance", "vibrance", "bwLab", "flatten"]],
+  ["Edit", ["undo", "redo", "stepForward", "stepBackward", "cut", "copy", "copyMerged", "paste", "pasteInto", "clear", "fill", "fillFg", "fillBg", "fillFgKeep", "fillBgKeep", "transformAgain", "defineBrush", "purgeUndo", "purgeClipboard", "purgeHistories", "purgeAll", "keyboardShortcuts", "preferences", "preferencesLast"]],
+  ["Image", ["cropToSelection", "invert", "desaturate", "hueSaturation", "brightnessContrast", "autoLevels", "autoContrast", "autoColor", "equalize", "threshold", "posterize", "gradientMap", "channelMixer", "shadowsHighlights", "exposure", "whiteBalance", "vibrance", "bwLab", "flatten"]],
   ["Filter", ["lastFilter", "lastFilterDialog", "filterLibrary", "fade"]],
   [
     "Layer",
-    ["newLayer", "newLayerQuick", "newSet", "newSetFromLinked", "fromBackground", "layerViaCopy", "layerViaCut", "duplicateLayer", "deleteLayer", "layerProperties", "editMask", "editLayer", "maskToggle", "maskOverlayToggle", "maskViewGray", "loadMaskSelection", "loadTransparency", "maskLinkToggle", "maskInvert", "maskEdge", "editText", "rasterizeTypeLayer", "typeConvert", "groupWithPrevious", "ungroup", "bringToFront", "bringForward", "sendBackward", "sendToBack", "mergeDown", "mergeVisible"],
+    ["newLayer", "newLayerQuick", "newSet", "newSetFromLinked", "fromBackground", "layerViaCopy", "layerViaCut", "duplicateLayer", "deleteLayer", "layerProperties", "editMask", "editLayer", "maskToggle", "maskOverlayToggle", "maskViewGray", "loadMaskSelection", "loadTransparency", "maskLinkToggle", "maskInvert", "maskEdge", "editText", "rasterizeTypeLayer", "typeConvert", "groupWithPrevious", "ungroup", "bringToFront", "bringForward", "sendBackward", "sendToBack", "mergeDown", "mergeVisible", "stampVisible", "selectLayerUp", "selectLayerDown", "selectTopLayer", "selectBottomLayer", "lockTransparency"],
   ],
+  ["Blend Modes", ["blendNext", "blendPrev", ...BLEND_IDS]],
   ["Select", ["selectAll", "deselect", "reselect", "inverse", "colorRange", "feather", "border", "smooth", "expand", "contract", "quickMask"]],
-  ["View", ["zoomIn", "zoomOut", "fit", "actual", "extras", "showGuides", "showGrid", "rulers", "snap", "lockGuides", "newGuide", "clearGuides", "cycleScreen"]],
-  ["Window", ["nextDoc", "prevDoc", "cascade", "tile", "docFloating", "docMaximized", "minimizeDoc", "toggleChrome", "toggleToolbox", "toggleOptions", "toggleStatus", "showMasks", "showCharacter", "showParagraph", "workspaceSave"]],
+  ["View", ["zoomIn", "zoomOut", "fit", "actual", "extras", "showGuides", "showGrid", "rulers", "snap", "lockGuides", "newGuide", "clearGuides", "cycleScreen", "scrollUp", "scrollDown", "scrollLeft", "scrollRight", "scrollUpSmall", "scrollDownSmall", "scrollLeftSmall", "scrollRightSmall", "scrollTopLeft", "scrollBottomRight"]],
+  ["Window", ["nextDoc", "prevDoc", "cascade", "tile", "docFloating", "docMaximized", "minimizeDoc", "toggleChrome", "togglePalettes", "toggleToolbox", "toggleOptions", "toggleStatus", "paletteBrushes", "paletteColor", "paletteLayers", "paletteInfo", "paletteActions", "showMasks", "showCharacter", "showParagraph", "workspaceSave"]],
   ["Help", ["shortcuts"]],
   ["Painting", ["defaultColors", "swapColors", "brushSmaller", "brushLarger", "brushSofter", "brushHarder"]],
 ];
+
+/** Menu labels that need their menu's name to make sense in a list of every command. */
+function catalogLabel(id: string, label: string): string {
+  const l = label.replace(/\.\.\.$/, "");
+  if (id.startsWith("purge")) return `Purge ${l}`;
+  if (id === "transformAgain") return "Transform Again";
+  return l;
+}
 
 export class Shortcuts {
   /** Overrides: binding id -> combo ("" = no shortcut). */
@@ -120,6 +130,16 @@ export class Shortcuts {
     });
   }
 
+  /** Re-read default shortcuts that depend on preferences (the Redo key), and rebuild the key map. */
+  refreshDefaults(): void {
+    for (const [id, a] of this.bindings) {
+      if (a.shortcut) this.defaults.set(id, canonical(a.shortcut));
+      else this.defaults.delete(id);
+    }
+    this.rebuild();
+    this.onChange?.();
+  }
+
   effective(id: string): string {
     return id in this.overrides ? this.overrides[id] : (this.defaults.get(id) ?? "");
   }
@@ -153,7 +173,7 @@ export class Shortcuts {
   catalog(): { category: string; items: { id: string; label: string }[] }[] {
     const out = CATEGORIES.map(([category, ids]) => ({
       category,
-      items: ids.filter((id) => this.bindings.has(id)).map((id) => ({ id, label: this.bindings.get(id)!.label.replace(/\.\.\.$/, "") })),
+      items: ids.filter((id) => this.bindings.has(id)).map((id) => ({ id, label: catalogLabel(id, this.bindings.get(id)!.label) })),
     }));
     out.push({
       category: "Tools",
@@ -185,8 +205,12 @@ export class Shortcuts {
   install(): void {
     const app = this.app;
     window.addEventListener("keydown", (e) => {
+      if (e.getModifierState) app.setCapsLock(e.getModifierState("CapsLock"));
       // Holding Ctrl (Cmd on a Mac) borrows the Move tool.
-      if ((e.key === "Control" || e.key === "Meta") && !e.repeat && !isModalOpen() && !(e.target as HTMLElement).closest?.("input, select, textarea")) app.holdCtrl(true);
+      const free = !e.repeat && !isModalOpen() && !(e.target as HTMLElement).closest?.("input, select, textarea");
+      if ((e.key === "Control" || e.key === "Meta") && free) app.holdCtrl(true);
+      // Holding Alt with a painting tool borrows the Eyedropper.
+      if (e.key === "Alt" && free) app.holdAlt(true);
       if (isModalOpen() || isModifierKey(e)) return;
       const target = e.target as HTMLElement;
       const typing =
@@ -203,9 +227,12 @@ export class Shortcuts {
         return;
       }
       const combo = comboOf(e);
-      if (combo === "Space") {
+      // Space: the Hand tool (Shift or Alt may be held for the tool underneath, e.g. a constrained marquee);
+      // Ctrl+Space: the Zoom tool (in), Ctrl+Alt+Space: zoom out, for as long as the keys are held.
+      if (e.code === "Space") {
         e.preventDefault();
-        app.holdSpace(true);
+        if (e.ctrlKey || e.metaKey) app.holdZoom(true);
+        else app.holdSpace(true);
         return;
       }
       if (!e.repeat && this.preHandler?.(combo)) {
@@ -224,13 +251,35 @@ export class Shortcuts {
           const key = id.slice(id.indexOf(":") + 1);
           const group = this.toolGroups.get(key)!;
           const cur = group.includes(app.tool.id) ? app.tool.id : (this.lastInGroup.get(key) ?? group[0]);
-          const next = id.startsWith("toolcycle:") && group.includes(app.tool.id) ? group[(group.indexOf(cur) + 1) % group.length] : cur;
+          // Preferences > Use Shift Key for Tool Switch: off, pressing the letter again cycles.
+          const cycle = (id.startsWith("toolcycle:") && app.prefs.shiftToolSwitch) || (id.startsWith("toolgroup:") && !app.prefs.shiftToolSwitch);
+          const next = cycle && group.includes(app.tool.id) ? group[(group.indexOf(cur) + 1) % group.length] : cur;
           this.lastInGroup.set(key, next);
           app.setTool(next);
           return;
         }
         const a = this.bindings.get(id)!;
         if (!a.enabled || a.enabled()) void a.run();
+        return;
+      }
+      // Alt+arrow with the Move tool: nudge a copy (of the selected pixels, or of the layer).
+      if (app.doc && e.altKey && !e.ctrlKey && !e.metaKey && combo.replace(/^(Alt\+)?(Shift\+)?/, "").startsWith("Arrow") && app.tool.id === "move") {
+        const k = combo.replace(/^(Alt\+)?(Shift\+)?/, "");
+        const d = e.shiftKey ? 10 : 1;
+        const dx = k === "ArrowLeft" ? -d : k === "ArrowRight" ? d : 0;
+        const dy = k === "ArrowUp" ? -d : k === "ArrowDown" ? d : 0;
+        e.preventDefault();
+        if (app.doc.selection && app.doc.activeLayer && !app.doc.quickMask) app.run("edit.moveSelection", { dx, dy, duplicate: true });
+        else if (app.doc.activeLayer && !app.doc.activeLayer.isBackground) {
+          try {
+            app.bus.group("Duplicate Layer", () => {
+              app.bus.dispatch("layer.duplicate", {});
+              app.bus.dispatch("layer.offset", { dx, dy });
+            });
+          } catch (err) {
+            app.toast(`Could not duplicate the layer: ${err instanceof Error ? err.message : String(err)}.`);
+          }
+        }
         return;
       }
       if (!app.doc || e.ctrlKey || e.metaKey || e.altKey) return;
@@ -253,34 +302,96 @@ export class Shortcuts {
         e.preventDefault();
         return;
       }
-      if (/^[0-9]$/.test(key) && !e.shiftKey) {
-        // Number keys set tool opacity: 1 = 10% ... 0 = 100%; otherwise layer opacity.
-        const v = key === "0" ? 100 : +key * 10;
-        const s = app.settings;
-        const t = app.tool.id;
-        if (t === "brush") s.brushOpacity = v;
-        else if (t === "pencil") s.pencilOpacity = v;
-        else if (t === "eraser") s.eraserOpacity = v;
-        else if (t === "bucket") s.bucketOpacity = v;
-        else if (t === "gradient") s.gradientOpacity = v;
-        else if (app.doc.activeNode && !app.doc.activeLayer?.isBackground) {
-          app.run("layer.setProperties", { opacity: v });
+      if (/^[0-9]$/.test(key)) {
+        if (this.numberKey(key, e.shiftKey)) e.preventDefault();
+        return;
+      }
+      // Enter: the options bar's first number field (opacity, tolerance...), as in Photoshop.
+      if (key === "Enter" && !e.shiftKey) {
+        const f = document.querySelector<HTMLInputElement>("#optionsbar input[type=number]:not([disabled])");
+        if (f) {
           e.preventDefault();
-          return;
-        } else return;
-        app.emit("settings");
-        app.status(`Opacity ${v}%`);
-        e.preventDefault();
+          f.focus();
+          f.select();
+        }
       }
     });
     window.addEventListener("keyup", (e) => {
-      if (e.code === "Space") app.holdSpace(false);
+      if (e.getModifierState) app.setCapsLock(e.getModifierState("CapsLock"));
+      if (e.code === "Space") {
+        app.holdSpace(false);
+        app.holdZoom(false);
+      }
       if (e.key === "Control" || e.key === "Meta") app.holdCtrl(false);
+      if (e.key === "Alt") {
+        app.holdAlt(false);
+        // A lone Alt press would otherwise move focus to the browser's menu.
+        e.preventDefault();
+      }
     });
-    window.addEventListener("blur", () => {
-      app.holdSpace(false);
-      app.holdCtrl(false);
-    });
+    window.addEventListener("blur", () => app.releaseHeldKeys());
+  }
+
+  /** The number keys: 1 = 10% ... 0 = 100%, two quick digits for any value (4 then 5 = 45%), Shift for flow. */
+  private lastDigit: { key: string; at: number; tool: string; shift: boolean } | null = null;
+  private numberKey(key: string, shift: boolean): boolean {
+    const app = this.app;
+    if (!app.doc) return false;
+    const t = app.baseTool.id;
+    const now = performance.now();
+    const prev = this.lastDigit;
+    let v = key === "0" ? 100 : +key * 10;
+    if (prev && prev.tool === t && prev.shift === shift && now - prev.at < 600) {
+      v = +(prev.key + key);
+      this.lastDigit = null;
+    } else this.lastDigit = { key, at: now, tool: t, shift };
+    v = Math.max(1, Math.min(100, v));
+    const s = app.settings as unknown as Record<string, number>;
+    if (shift) {
+      // Flow (the brush tools with a Flow setting).
+      const flow = ({ brush: "brushFlow", eraser: "eraserFlow", sponge: "spongeFlow" } as Record<string, string>)[t];
+      if (!flow) return false;
+      s[flow] = v;
+      app.emit("settings");
+      app.status(`Flow ${v}%`);
+      return true;
+    }
+    const opacityKey = (
+      {
+        brush: "brushOpacity",
+        pencil: "pencilOpacity",
+        eraser: "eraserOpacity",
+        bucket: "bucketOpacity",
+        gradient: "gradientOpacity",
+        stamp: "stampOpacity",
+        patternStamp: "patternStampOpacity",
+        historyBrush: "historyBrushOpacity",
+        artHistory: "artOpacity",
+        magicEraser: "magicEraserOpacity",
+        dodge: "dodgeExposure",
+        burn: "burnExposure",
+        sponge: "spongeFlow",
+        blur: "blurStrength",
+        sharpen: "sharpenStrength",
+        smudge: "smudgeStrength",
+      } as Record<string, string>
+    )[t];
+    if (opacityKey) {
+      s[opacityKey] = v;
+      app.emit("settings");
+      const what = /Exposure$/.test(opacityKey) ? "Exposure" : /Strength$/.test(opacityKey) ? "Strength" : /Flow$/.test(opacityKey) ? "Flow" : "Opacity";
+      app.status(`${what} ${v}%`);
+      return true;
+    }
+    // Other tools: the layer's opacity.
+    if (app.doc.activeNode && !app.doc.activeLayer?.isBackground) {
+      if (prev && prev.tool === t && now - prev.at < 600 && app.bus.history.current?.label === "Opacity Change") {
+        // The second digit replaces the first one's step.
+        void app.historyMove("back").then(() => app.run("layer.setProperties", { opacity: v }));
+      } else app.run("layer.setProperties", { opacity: v });
+      return true;
+    }
+    return false;
   }
 
   // ---------------------------------------------------------------- dialogs
@@ -372,7 +483,7 @@ export class Shortcuts {
     }
     const extra = el("p", {
       class: "sc-note",
-      text: "Also: hold Space for the Hand tool and Ctrl for the Move tool; Ctrl-click or Shift-click layers to select several; Alt+wheel or pinch to zoom; 1-0 set painting opacity; arrows nudge with the Move tool. In a browser a few Ctrl shortcuts are reserved; the desktop app receives them all.",
+      text: "Also: hold Space for the Hand tool, Ctrl for the Move tool, Ctrl+Space (Ctrl+Alt+Space) to zoom in (out), and Alt with a painting tool for the Eyedropper; Space while drawing a marquee moves it. Ctrl-click or Shift-click layers to select several. Number keys set the tool's opacity or strength (two quick digits for any value, Shift for flow), or the layer's opacity. Arrows nudge with the Move tool; Alt+arrows nudge a copy. Enter jumps to the options bar. Caps Lock makes cursors precise. Double-click the Hand tool to fit on screen, the Zoom tool for 100%. Alt+wheel or pinch zooms. In a browser a few Ctrl shortcuts are reserved; the desktop app receives them all.",
     });
     await modal("Keyboard Shortcuts Reference", el("div", { class: "sc-editor" }, table, extra), [{ label: "OK", value: "ok", default: true }], true);
   }

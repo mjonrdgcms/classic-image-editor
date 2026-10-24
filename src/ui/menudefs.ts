@@ -55,10 +55,12 @@ export function buildMenus(app: App, a: Actions, ws: Workspace, themes: ThemeMan
         a.stroke,
         "-",
         a.freeTransform,
-        { label: "Transform", submenu: [a.tScale, a.tRotate, a.tSkew, a.tDistort, a.tPerspective, "-", a.tRot180, a.tRotCW, a.tRotCCW, "-", a.tFlipH, a.tFlipV] },
+        { label: "Transform", submenu: [a.transformAgain, "-", a.tScale, a.tRotate, a.tSkew, a.tDistort, a.tPerspective, "-", a.tRot180, a.tRotCW, a.tRotCCW, "-", a.tFlipH, a.tFlipV] },
         "-",
         a.defineBrush,
         a.definePattern,
+        "-",
+        { label: "Purge", submenu: [a.purgeUndo, a.purgeClipboard, a.purgeHistories, "-", a.purgeAll] },
         "-",
         a.keyboardShortcuts,
         a.preferences,
@@ -74,6 +76,7 @@ export function buildMenus(app: App, a: Actions, ws: Workspace, themes: ThemeMan
             a.levels,
             a.autoLevels,
             a.autoContrast,
+            a.autoColor,
             a.curves,
             a.colorBalance,
             a.brightnessContrast,
@@ -182,6 +185,7 @@ export function buildMenus(app: App, a: Actions, ws: Workspace, themes: ThemeMan
         "-",
         a.mergeDown,
         a.mergeVisible,
+        a.stampVisible,
         a.flatten,
       ],
     },
@@ -279,7 +283,11 @@ export function buildMenus(app: App, a: Actions, ws: Workspace, themes: ThemeMan
           .allPalettes()
           .filter((p) => !p.soon)
           .sort((x, y) => x.title.localeCompare(y.title))
-          .map((p) => ({ label: p.title, checked: () => ws.isOpen(p.id) || ws.isWellOpen(p.id), run: () => ws.toggle(p.id) }));
+          .map((p) => {
+            // F5-F9 (PS7) show in the menu.
+            const fkey = ({ brushes: a.paletteBrushes, color: a.paletteColor, layers: a.paletteLayers, info: a.paletteInfo, actions: a.paletteActions } as Record<string, { shortcut?: string }>)[p.id];
+            return { label: p.title, shortcut: fkey?.shortcut, checked: () => ws.isOpen(p.id) || ws.isWellOpen(p.id), run: () => ws.toggle(p.id) };
+          });
         const docs: MenuItem[] = app.sessions.map((s) => ({
           label: s.doc.name + (app.sessionModified(s) ? "*" : ""),
           checked: () => app.active === s,
@@ -304,6 +312,7 @@ export function buildMenus(app: App, a: Actions, ws: Workspace, themes: ThemeMan
           a.toggleOptions,
           a.toggleStatus,
           a.toggleChrome,
+          a.togglePalettes,
           "-",
           ...palettes,
           ...(docs.length ? (["-", ...docs] as MenuItem[]) : []),

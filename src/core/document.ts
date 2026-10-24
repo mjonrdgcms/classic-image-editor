@@ -236,6 +236,7 @@ export interface Slice {
 export interface DocSnapshot {
   width: number;
   height: number;
+  resolution?: number;
   stack: NodeSnap[];
   activeId: number;
   /** Other selected layers and sets. */
@@ -264,6 +265,8 @@ export type DocEvent =
 export class Document {
   width: number;
   height: number;
+  /** Pixels per inch: only changes print size (and rulers in inches, cm...), never the pixels. */
+  resolution = 72;
   stack: Node[] = [];
   private active = 0;
   /**
@@ -523,6 +526,7 @@ export class Document {
     return {
       width: this.width,
       height: this.height,
+      resolution: this.resolution,
       stack: this.stack.map((n) =>
         n.kind === "layer" ? snapLayer(n) : { kind: "group", props: n.props(), children: n.children.map(snapLayer), mask: n.mask ? n.mask.share() : null },
       ),
@@ -604,6 +608,7 @@ export class Document {
     this.slices = (s.slices ?? []).map((n) => ({ ...n }));
     const pathsChanged = this.paths.length !== (s.paths ?? []).length || this.paths.some((p, i) => p !== s.paths![i]);
     this.paths = [...(s.paths ?? [])];
+    if (s.resolution) this.resolution = s.resolution;
     if (annotChanged || pathsChanged) this.emit({ type: "guides" });
     const selChanged = (this.selection?.key() ?? "") !== (s.selection?.key() ?? "") || !!this.selection !== !!s.selection;
     this.selection = s.selection ? s.selection.share() : null;

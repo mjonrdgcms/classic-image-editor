@@ -12,16 +12,59 @@ export const TILE_PX = TILE * TILE;
 
 let nextTileVersion = 1;
 
+/** Where a tile's bytes were written on the scratch disk. */
+export interface SwapRef {
+  pack: string;
+  offset: number;
+  length: number;
+}
+
+/** Thrown when pixels that moved to the scratch disk are read before being loaded back. */
+export class EvictedTileError extends Error {
+  constructor() {
+    super("these pixels are on the scratch disk and have not been loaded back yet");
+    this.name = "EvictedTileError";
+  }
+}
+
 export class Tile {
-  /** RGBA bytes, TILE * TILE * 4. */
-  data: Uint8ClampedArray;
+  /** RGBA bytes, null while they are on the scratch disk (see TilePager). */
+  private bytes: Uint8ClampedArray | null;
   /** Shared with a history snapshot; must be cloned before writing. */
   frozen = false;
   /** Bumped on every write so the GPU knows to re-upload. */
   version = nextTileVersion++;
+  /** A copy on the scratch disk (kept after loading back, since frozen tiles never change). */
+  swap: SwapRef | null = null;
 
   constructor(data?: Uint8ClampedArray) {
-    this.data = data ?? new Uint8ClampedArray(TILE_PX * 4);
+    this.bytes = data ?? new Uint8ClampedArray(TILE_PX * 4);
+  }
+
+  /** RGBA bytes, TILE * TILE * 4. */
+  get data(): Uint8ClampedArray {
+    const d = this.bytes;
+    if (!d) throw new EvictedTileError();
+    return d;
+  }
+  set data(d: Uint8ClampedArray) {
+    this.bytes = d;
+  }
+
+  /** In memory (not only on the scratch disk). */
+  get resident(): boolean {
+    return this.bytes !== null;
+  }
+
+  /** Drop the bytes from memory; they are at swap on the scratch disk. */
+  evict(): void {
+    if (!this.swap || !this.frozen) throw new Error("only frozen tiles with a scratch copy can be evicted");
+    this.bytes = null;
+  }
+
+  /** Bring the bytes back from the scratch disk. */
+  load(d: Uint8Array): void {
+    this.bytes = new Uint8ClampedArray(d.buffer, d.byteOffset, d.byteLength);
   }
 
   clone(): Tile {

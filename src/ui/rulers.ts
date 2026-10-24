@@ -1,12 +1,16 @@
 /**
- * Rulers along the top and left of the document window (pixels). Drag out
+ * Rulers along the top and left of the document window, in the units chosen
+ * in Preferences (right-click a ruler to change them). Drag out
  * of a ruler to create a guide: the top ruler makes horizontal guides, the
  * left ruler vertical ones.
  */
 
 import type { App, Session } from "../app";
+import { UNIT_LABELS, pxPerUnit, type Units } from "../prefs";
+import { showPopupMenu } from "./menus";
 
-const STEPS = [1, 2, 5, 10, 20, 25, 50, 100, 200, 250, 500, 1000, 2000, 2500, 5000, 10000, 20000];
+/** Major tick spacings, in ruler units. */
+const STEPS = [0.01, 0.02, 0.05, 0.1, 0.2, 0.25, 0.5, 1, 2, 5, 10, 20, 25, 50, 100, 200, 250, 500, 1000, 2000, 2500, 5000, 10000, 20000];
 
 export function mountRulers(app: App, s: Session): void {
   const grid = s.win.grid, top = s.win.rulerTop, left = s.win.rulerLeft;
@@ -41,20 +45,26 @@ export function mountRulers(app: App, s: Session): void {
       ctx.lineWidth = 1;
       ctx.font = '500 9px "IBM Plex Sans", system-ui, sans-serif';
       const zoom = v().zoom;
-      const major = STEPS.find((s) => s * zoom >= 50) ?? STEPS[STEPS.length - 1];
-      const minor = major / (major % 10 === 0 ? 10 : major % 5 === 0 ? 5 : 2);
+      // Preferences > Units & Rulers: one unit is k image pixels.
+      const P = app.prefs;
+      const k = pxPerUnit(P.rulerUnits, s.doc.resolution, P.pointsPerInch, horiz ? s.doc.width : s.doc.height);
+      const major = STEPS.find((st) => st * k * zoom >= 50) ?? STEPS[STEPS.length - 1];
+      const n = major >= 1 ? major : Math.round(major * 100);
+      const minor = major / (n % 10 === 0 ? 10 : n % 5 === 0 ? 5 : 2);
+      const label = (u: number) => String(Math.round(u * 100) / 100);
       const len = horiz ? w : h;
-      const c0 = horiz ? toCanvas(0, 0).x : toCanvas(0, 0).y;
-      const c1 = horiz ? toCanvas(len, 0).x : toCanvas(0, len).y;
+      const c0 = (horiz ? toCanvas(0, 0).x : toCanvas(0, 0).y) / k;
+      const c1 = (horiz ? toCanvas(len, 0).x : toCanvas(0, len).y) / k;
       ctx.beginPath();
-      for (let v = Math.floor(c0 / minor) * minor; v <= c1; v += minor) {
-        const s = Math.round(horiz ? toScreen(v, 0).x : toScreen(0, v).y) + 0.5;
-        const isMajor = Math.abs(v / major - Math.round(v / major)) < 1e-6;
-        const tick = isMajor ? 16 : Math.abs((v * 2) / major - Math.round((v * 2) / major)) < 1e-6 ? 7 : 4;
+      for (let i = Math.floor(c0 / minor); i * minor <= c1; i++) {
+        const u = i * minor;
+        const s = Math.round(horiz ? toScreen(u * k, 0).x : toScreen(0, u * k).y) + 0.5;
+        const isMajor = Math.abs(u / major - Math.round(u / major)) < 1e-6;
+        const tick = isMajor ? 16 : Math.abs((u * 2) / major - Math.round((u * 2) / major)) < 1e-6 ? 7 : 4;
         if (horiz) {
           ctx.moveTo(s, h);
           ctx.lineTo(s, h - tick);
-          if (isMajor) ctx.fillText(String(Math.round(v)), s + 2, 9);
+          if (isMajor) ctx.fillText(label(u), s + 2, 9);
         } else {
           ctx.moveTo(w, s);
           ctx.lineTo(w - tick, s);
@@ -62,7 +72,7 @@ export function mountRulers(app: App, s: Session): void {
             ctx.save();
             ctx.translate(9, s + 2);
             ctx.rotate(-Math.PI / 2);
-            ctx.fillText(String(Math.round(v)), -ctx.measureText(String(Math.round(v))).width - 2, 0);
+            ctx.fillText(label(u), -ctx.measureText(label(u)).width - 2, 0);
             ctx.restore();
           }
         }
@@ -103,7 +113,17 @@ export function mountRulers(app: App, s: Session): void {
       draw();
     });
   };
-  for (const t of ["view", "pointer", "doc", "theme", "screen"] as const) app.on(t, queue);
+  for (const t of ["view", "pointer", "doc", "theme", "screen", "prefs"] as const) app.on(t, queue);
+  // Right-click a ruler to change units (as in Photoshop).
+  for (const r of [top, left])
+    r.addEventListener("contextmenu", (e) => {
+      e.preventDefault();
+      showPopupMenu(
+        (Object.keys(UNIT_LABELS) as Units[]).map((u) => ({ label: UNIT_LABELS[u][0].toUpperCase() + UNIT_LABELS[u].slice(1), checked: app.prefs.rulerUnits === u, run: () => app.setPrefs({ rulerUnits: u }) })),
+        e.clientX,
+        e.clientY,
+      );
+    });
   new ResizeObserver(queue).observe(grid);
 
   // Drag a guide out of a ruler.

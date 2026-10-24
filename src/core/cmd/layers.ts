@@ -721,6 +721,25 @@ export const layerCommands: CommandDef[] = [
     },
   },
   {
+    name: "layer.stampVisible",
+    label: "Merge Visible to New Layer",
+    description: "Put a merged copy of everything visible on a new layer above the active one, leaving the layers as they are (Ctrl+Alt+Shift+E).",
+    params: { type: "object", properties: { name: { type: "string" } } },
+    history: true,
+    enabled: (ctx) => ctx.doc.layers.some((l) => l.visible),
+    run({ doc }, p: { name?: string }) {
+      const full = canvasRect(doc);
+      const px = compositeNodes(doc.stack, full);
+      const l = doc.addLayer(p.name ?? doc.nextLayerName());
+      l.grid.writeRegion(full, px);
+      l.grid.compact();
+      doc.activeLayerId = l.id;
+      doc.editMask = false;
+      doc.emit({ type: "layers" });
+      doc.dirty(null);
+    },
+  },
+  {
     name: "image.flatten",
     label: "Flatten Image",
     description: "Merge all visible layers into a single Background layer; hidden layers are discarded.",

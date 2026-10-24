@@ -225,19 +225,30 @@ function numField(app: App, key: keyof TextStyle, label: string, opts: { min: nu
   if (opts.presets) n.setAttribute("list", id);
   const dl = opts.presets ? el("datalist", { id }) : null;
   for (const v of opts.presets ?? []) dl!.append(el("option", { value: v }));
+  // Sizes are stored in pixels and shown in Preferences > Units & Rulers > Type (points or mm use the image's resolution).
+  const lengths = opts.unit === "px";
+  const k = () => {
+    if (!lengths) return 1;
+    const ppi = app.doc?.resolution ?? app.prefs.newResolution;
+    const u = app.prefs.typeUnits;
+    return u === "points" ? app.prefs.pointsPerInch / ppi : u === "mm" ? 25.4 / ppi : 1;
+  };
+  const unitText = () => (lengths ? { pixels: "px", points: "pt", mm: "mm" }[app.prefs.typeUnits] : (opts.unit ?? ""));
   n.addEventListener("change", () => {
-    let v = +n.value;
+    let v = +n.value / k();
     if (!isFinite(v)) return;
     v = Math.max(opts.min, Math.min(opts.max, v));
     typeTool(app).applyStyle({ [key]: v } as Partial<TextStyle>);
   });
-  const node = el("label", { class: "tf-num type-ui", title: label }, opts.icon ? el("span", { class: "tf-icon", text: opts.icon }) : label + ":", n, opts.unit ? el("span", { class: "unit", text: opts.unit }) : null, dl);
+  const unit = opts.unit ? el("span", { class: "unit", text: unitText() }) : null;
+  const node = el("label", { class: "tf-num type-ui", title: label }, opts.icon ? el("span", { class: "tf-icon", text: opts.icon }) : label + ":", n, unit, dl);
   return {
     node,
     sync: () => {
       const v = typeTool(app).style()[key] as number;
-      if (document.activeElement !== n) n.value = opts.auto && !v ? "" : String(Math.round(v * 10) / 10);
+      if (document.activeElement !== n) n.value = opts.auto && !v ? "" : String(Math.round(v * k() * 10) / 10);
       if (opts.auto) n.placeholder = opts.auto;
+      if (unit) unit.textContent = unitText();
     },
   };
 }
@@ -339,7 +350,7 @@ export function typeOptionParts(app: App, openPalettes: () => void): Part[] {
 
 function bindSync(app: App, parts: Part[]): void {
   const sync = () => parts.forEach((p) => p.sync());
-  for (const topic of ["settings", "doc", "tool", "sessions"] as const) app.on(topic, sync);
+  for (const topic of ["settings", "doc", "tool", "sessions", "prefs"] as const) app.on(topic, sync);
   sync();
 }
 

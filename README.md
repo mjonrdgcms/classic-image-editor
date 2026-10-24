@@ -3,11 +3,27 @@
 A fast, offline desktop image editor in the spirit of the classic Photoshop 7
 workflow, with a local AI assistant (via Ollama) on the roadmap.
 
-**Current version: 0.10.0** (core editing, filters, Black & White Lab, Actions, layer masks, type with 115 bundled fonts, Liquify, AI people selection, Face Swap, layered .cie files, Free Transform, Levels & Curves, retouching tools, Content-Aware Fill, layer styles, and now selecting several layers at once, Ctrl for the Move tool, shapes and paths, and every tool in the PS7 toolbox).
+**Current version: 0.12.0** (core editing, filters, Black & White Lab, Actions, layer masks, type with 115 bundled fonts, Liquify, AI people selection, Face Swap, layered .cie files, Free Transform, Levels & Curves, retouching tools, Content-Aware Fill, layer styles, several layers at once, shapes and paths, the full PS7 toolbox, Photoshop's keyboard shortcuts, a full Preferences dialog, scratch disks and crash recovery, and now apps for macOS and Linux as well as Windows).
 
 ## Download
 
-Get the latest Windows build from the [Releases page](https://github.com/mjonrdgcms/classic-image-editor/releases/latest): the `-setup.exe` installer or the `-portable.exe` standalone app (Windows 10/11 with WebView2).
+| System | Files | Notes |
+| --- | --- | --- |
+| Windows 10/11 | `Classic Image Editor X Setup.exe`, or the portable `.exe` | |
+| macOS 11 Big Sur or later (Apple silicon and Intel) | `Classic Image Editor X (macOS).dmg` | Open the disk image and drag the app to Applications. The app isn't notarized by Apple yet, so the first time, right-click it and choose **Open** (or allow it under System Settings > Privacy & Security). |
+| Ubuntu, Debian, Mint | `Classic Image Editor_X_amd64.deb` | `sudo apt install ./Classic*.deb` |
+| Fedora, openSUSE, RHEL | `Classic Image Editor-X-1.x86_64.rpm` | `sudo dnf install ./Classic*.rpm` |
+| Any 64-bit Linux | `Classic Image Editor_X_amd64.AppImage` | `chmod +x` it and run it; no install needed. |
+
+The macOS and Linux apps are built by `.github/workflows/desktop.yml`
+(Actions tab: download them from a run's artifacts). They draw with WebKit
+(Safari's engine) instead of Windows' WebView2, and the end-to-end suite
+runs in both engines.
+
+On a Mac, the Command key does everything Ctrl does in this README
+(Cmd+Z, Cmd-click on a thumbnail, holding Cmd for the Move tool), and Option
+is Alt. On Linux the scratch disk defaults to `/tmp`; pick a roomier folder
+in Preferences > Memory & Scratch Disks for big images.
 
 ## Run it
 
@@ -48,7 +64,7 @@ browser. The desktop app receives them all.
 | --- | --- |
 | Image windows | Every open image gets its own floating window (the default, as in PS7): drag by the title bar, resize from any edge, minimize, maximize, close. Click a window to make it active. Maximized mode shows the active image full size with a tab per image. Window > Arrange: Cascade, Tile, Floating / Maximized, Next / Previous Image (Ctrl+Tab / Ctrl+Shift+Tab). Close (Ctrl+W) and Close All (Ctrl+Alt+W) ask before discarding changes. Each image has its own undo history |
 | Files | New (presets, white / background / transparent), Open PNG, JPEG, GIF, BMP, WebP, AVIF and .cie, drag-and-drop or paste to open, **Save / Save As (Ctrl+S / Ctrl+Shift+S) to a layered .cie file**, Open Recent, Revert (F12), Save a Copy as PNG or JPEG (PS7-style 0-12 quality); double-clicking a .cie file opens it in the editor (see Files below) |
-| Image size | Image Size (Ctrl+Alt+I: pixels or percent, constrain proportions, Bicubic / Bilinear / Lanczos / Nearest Neighbor), Canvas Size (Ctrl+Alt+C: anchor grid, relative), Rotate Canvas (180°, 90° CW / CCW, arbitrary, flip), Trim, Duplicate Image, Histogram |
+| Image size | Image Size (Ctrl+Alt+I: pixels or percent, Document Size in inches / cm / mm / points / picas, Resolution, Resample Image on or off, constrain proportions, Bicubic / Bilinear / Lanczos / Nearest Neighbor), Canvas Size (Ctrl+Alt+C: anchor grid, relative), Rotate Canvas (180°, 90° CW / CCW, arbitrary, flip), Trim, Duplicate Image, Histogram |
 | Transform | Free Transform (Ctrl+T) on a layer, several selected layers at once, selected pixels or the selection outline: scale (in proportion by default), rotate, skew, distort, perspective, flip, numeric entry, reference point (see Transform below) |
 | Several layers | Ctrl-click layers to add or remove them, Shift-click to select a run; move, Free Transform, align, distribute, link, group into a set, duplicate, delete, merge, and change opacity, blend mode or visibility for all of them at once (see Several Layers below) |
 | Shapes and paths | Pen, Freeform Pen, Add / Delete Anchor Point, Convert Point, Path Selection and Direct Selection; Rectangle, Rounded Rectangle, Ellipse, Polygon (and star), Line (with arrowheads) and Custom Shape tools making editable shape layers or work paths; Paths palette (see Shapes and Paths below) |
@@ -72,13 +88,15 @@ browser. The desktop app receives them all.
 | Tool Presets | Save a tool with its settings and brush; pick from the palette or the options bar's tool icon |
 | Clipboard | Cut, Copy, Copy Merged, Paste, Paste Into; copies go to the system clipboard as PNG, and images copied in other programs paste in |
 | Crop | Crop tool with handles, shield and Enter / Esc; Image > Crop to the selection; cropping past the edge extends the canvas |
-| View | Rulers, guides (drag from rulers, move with the Move tool, New Guide, Lock, Clear), grid, snap to guides / grid / edges, Extras, three screen modes (F), zoom 1-1600% |
-| Filters | 178 filters in 15 categories (see Filter Library below), Last Filter (Ctrl+F), Last Filter with Dialog (Ctrl+Alt+F), Fade (Ctrl+Shift+F) with opacity and blend mode |
-| Adjustments | Levels (Ctrl+L), Curves (Ctrl+M), Color Balance (Ctrl+B), Photo Filter, Hue/Saturation (Ctrl+U), Brightness/Contrast, Exposure, Shadows/Highlights, Vibrance, White Balance, Channel Mixer, Gradient Map, Auto Levels, Auto Contrast, Equalize, Threshold, Posterize, Invert, Desaturate, and the Black & White Lab |
+| View | Rulers in pixels, inches, cm, mm, points, picas or percent (right-click to change), guides (drag from rulers, move with the Move tool, New Guide, Lock, Clear), grid (lines, dashed or dots, in any unit), pixel grid past 600%, snap to guides / grid / edges, Extras, three screen modes (F), zoom 1-1600% |
+| Filters | 179 filters in 15 categories (see Filter Library below), Last Filter (Ctrl+F), Last Filter with Dialog (Ctrl+Alt+F), Fade (Ctrl+Shift+F) with opacity and blend mode |
+| Adjustments | Levels (Ctrl+L), Curves (Ctrl+M), Color Balance (Ctrl+B), Photo Filter, Hue/Saturation (Ctrl+U), Brightness/Contrast, Exposure, Shadows/Highlights, Vibrance, White Balance, Channel Mixer, Gradient Map, Auto Levels, Auto Contrast, Auto Color (Ctrl+Shift+B), Equalize, Threshold, Posterize, Invert, Desaturate, and the Black & White Lab |
 | Actions | Record, play, function keys, sets, step and dialog toggles, Button Mode, Batch |
-| History | History palette, snapshots, Clear History, PS7's Ctrl+Z toggle |
+| History | History palette, snapshots, Clear History, PS7's Ctrl+Z toggle (or multi-level undo with Ctrl+Shift+Z / Ctrl+Y), Edit > Purge |
+| Memory | Scratch disks (up to four folders) for history that doesn't fit in memory, a memory limit, crash recovery copies (see Memory and Scratch Disks below) |
 | Patterns | Edit > Define Pattern from a selection, Edit > Fill with a pattern, the Pattern Stamp, and a pattern picker with ready-made patterns |
-| Preferences | Open images in floating or maximized windows (remembered), history states, cursors (standard / precise / brush size), transparency grid size and colors, guide and grid colors and spacing, theme, Ctrl for the Move tool, proportional Free Transform |
+| Preferences | Edit > Preferences (Ctrl+K) in nine sections, as in PS7: General, Tools, File Handling, Display & Cursors, Transparency, Units & Rulers, Guides Grid & Slices, Scratch Disks, Memory (see Preferences below) |
+| Shortcuts | Photoshop 7's keyboard, including the temporary tools (Space, Ctrl, Alt, Ctrl+Space), number keys for opacity and flow, blend mode keys, layer stepping and the palette F-keys (see Keyboard below); every shortcut can be changed |
 
 Every slot in the toolbox now holds a working tool. A few menu items from
 later milestones still appear greyed out in their PS7 places, with a
@@ -272,6 +290,94 @@ Move tool until you let go, so you can nudge a layer without leaving the
 brush. While using the Pen tools, Ctrl gives Direct Selection instead, as
 in Photoshop. It can be turned off in Edit > Preferences > Tools.
 
+**The Move tool moves the layers you chose.** Its options bar has
+**Auto-Select: Off / Layer / Layer Set**, Off by default: clicking
+anywhere moves the layers selected in the Layers palette. Layer (or Layer
+Set) picks whatever is under the pointer instead. Photoshop's habit of
+Ctrl-click turning Auto-Select on for one click is a preference (Tools),
+off by default, so holding Ctrl never switches layers by accident. **Show
+Bounding Box** draws handles around the layers; dragging one turns
+straight into Free Transform.
+
+## Keyboard
+
+Photoshop 7's tool letters and menu shortcuts work for everything the editor has (Help >
+Keyboard Shortcuts lists them; Edit > Keyboard Shortcuts changes them).
+Besides those:
+
+| Keys | Does |
+| --- | --- |
+| Hold Space / Ctrl / Ctrl+Space / Ctrl+Alt+Space | Hand / Move / Zoom in / Zoom out, until you let go |
+| Hold Alt with the Brush, Pencil, Paint Bucket, Gradient or Color Replacement | Eyedropper (click picks the foreground color) |
+| Alt with Dodge / Burn, Blur / Sharpen, the Eraser | The opposite tool; Erase to History |
+| Alt over a point with the Pen / Add / Delete Anchor | Convert Point / the other anchor tool |
+| 1 ... 0, or two quick digits (4, 5 = 45%) | The tool's opacity, exposure or strength; with other tools, the layer's opacity. Shift for flow |
+| Shift+= / Shift+- , Alt+Shift+N, M, S, O... | Next / previous blend mode, or one by its letter (the painting tool's mode, else the layer's) |
+| Alt+[ / Alt+] , Shift+Alt+[ / ] | Select the layer below / above, the bottom / top layer |
+| Ctrl+Alt+Shift+E | Merge everything visible into a new layer |
+| / | Lock transparent pixels |
+| Ctrl+Shift+T | Transform Again |
+| Shift+Alt+Backspace / Ctrl+Shift+Backspace | Fill with the foreground / background color, keeping transparency |
+| F5, F6, F7, F8, F9 | Brushes, Color, Layers, Info, Actions palettes |
+| Tab / Shift+Tab | Hide all palettes / all but the toolbox |
+| Page Up / Page Down (Ctrl: left / right), Home, End | Scroll a screen (Shift: 10 pixels), go to a corner |
+| Space while drawing a marquee | Move the marquee |
+| Alt+arrow with the Move tool | Nudge a copy |
+| Enter | Jump to the options bar's first field |
+| Caps Lock | Precise cursors |
+| Double-click the Hand / Zoom tool | Fit on Screen / Actual Pixels |
+| Ctrl+K / Ctrl+Alt+K | Preferences / the last Preferences section |
+
+## Preferences
+
+Edit > Preferences (Ctrl+K) is laid out like Photoshop 7's, one section at a
+time (Prev / Next, or the list):
+
+- **General:** Color Picker (the built-in, Photoshop-style one with HSB,
+  RGB, Lab, CMYK and hex, or the system's), default image interpolation
+  for Image Size and Free Transform, the Redo key (PS7's Ctrl+Z toggle, or
+  Ctrl+Z undoing many steps with Ctrl+Shift+Z or Ctrl+Y to redo), history
+  states, theme, floating or maximized windows, tool tips, keyboard zoom
+  resizing windows, zooming with the scroll wheel, a beep when long
+  operations finish, dynamic color sliders, saving palette locations, and
+  using Shift to switch tools.
+- **Tools:** Ctrl for the Move tool, Ctrl-click auto-select, Alt for the
+  Eyedropper, Free Transform keeping proportions.
+- **File Handling:** previews in .cie files, lower- or upper-case
+  extensions, JPEG quality, the length of Open Recent, and how often
+  recovery copies are saved.
+- **Display & Cursors:** painting and other cursors, a crosshair in the
+  brush outline, the pixel grid.
+- **Transparency:** checkerboard size and colors, the mask overlay.
+- **Units & Rulers:** ruler and type units, the resolution for new
+  images, PostScript or traditional points.
+- **Guides, Grid & Slices:** colors and line styles, grid spacing in any
+  unit with subdivisions, slice color and numbers.
+- **Scratch Disks** and **Memory:** see below.
+
+Images now have a resolution (pixels per inch): set in New and Image Size,
+read from and written to PNG and JPEG files, and used by rulers, the Info
+palette and type sizes in points or millimetres.
+
+## Memory and Scratch Disks
+
+Like Photoshop, the editor can use **scratch disks**: in Edit > Preferences
+> Scratch Disks, choose up to four folders on any drives (the system's
+temporary folder is the default). **Memory** sets how much of the
+computer's memory open images and their history may use. When they need
+more, the oldest history steps are written to the first scratch disk with
+room, then the next, and dropped from memory; going back to one in the
+History palette (or with undo) reads it in again. Steps on the scratch
+disk are marked in the History palette, and the status bar's ▸ menu can
+show **Scratch Sizes** (memory used / allowed) and **Efficiency** like PS7.
+Edit > Purge frees memory straight away. In a browser the scratch disk is
+the browser's private storage for the site.
+
+**Crash recovery:** every 10 minutes (File Handling) a copy of each image
+with unsaved changes goes to the scratch disk. Saving or closing the image,
+or quitting normally, deletes it; if the editor stops unexpectedly, the next
+start offers to open the copies.
+
 ## Shapes and Paths
 
 The **Pen** (P) clicks corner points and drags smooth ones; click the first
@@ -396,7 +502,9 @@ carry inside the program, so the first time you use one of these features the
 editor offers a one-time download. After that they work offline, and your
 images never leave the computer. On a machine without internet, use Load
 Files... in the same dialog with the four files copied from another
-computer (on Windows they are in `%LOCALAPPDATA%\app.classicimageeditor.desktop\models`). Help >
+computer (on Windows they are in `%LOCALAPPDATA%\app.classicimageeditor.desktop\models`,
+on macOS in `~/Library/Application Support/app.classicimageeditor.desktop/models`,
+on Linux in `~/.local/share/app.classicimageeditor.desktop/models`). Help >
 AI Models... shows what is installed and can remove the files. Every file
 is pinned to one version and checked against its SHA-256 after download.
 MediaPipe's license is in `public/licenses/`.
@@ -586,6 +694,7 @@ src/
     inpaint.ts     PatchMatch hole filling and seamless (healing) blending
     retouch.ts     stroke engine for the healing, clone, toning and focus tools
     styles.ts      layer effects, computed per layer and cached
+    scratch.ts     paging old history to the scratch disk and back
     vector.ts      paths: anchors and handles, flattening, filling, stroking
     shapes.ts      the shape tools' outlines and shape layers
     patterns.ts    patterns for fills and the Pattern Stamp
@@ -629,8 +738,9 @@ the CPU reference does; the end-to-end suite checks the two agree.
 ## Tests
 
 ```bash
-npm test                         # 426 unit tests
+npm test                         # 480 unit tests
 npm run build && npm run e2e     # browser checks + screenshots in e2e/out/
+E2E_BROWSER=webkit npm run e2e   # the same checks in WebKit (macOS / Linux engine)
 ```
 
 The end-to-end suite drives the real UI with mouse and keyboard: every
@@ -642,7 +752,10 @@ Spot Healing Brush and Clone Stamp, Free Transform, the Layer Style
 dialog, Levels, saving and reopening a .cie file, holding Ctrl for the Move
 tool, selecting, moving, aligning and transforming several layers, the
 Rectangle and Pen tools and the Paths palette, notes, slices, the Measure
-tool and the Pattern Stamp, crop, rulers and guides, dragging palettes and tabs
+tool and the Pattern Stamp, the Move tool's Auto-Select, the temporary
+tools (Alt Eyedropper, Ctrl+Space zoom), layer stepping, blend mode and
+number keys, Transform Again, the Preferences dialog, the Color Picker,
+scratch disk paging with undo, crop, rulers and guides, dragging palettes and tabs
 around, saving / resetting / loading workspaces, restarts, and remapped
 shortcuts. With the model files and two test photos in `e2e/models/` it
 also checks the model download, Select People on a group photo, Select
@@ -652,8 +765,9 @@ Subject, Face-Aware Liquify and a Face Swap between two windows.
 
 - Images are limited to the GPU's maximum texture size per side (usually 16384 px).
 - 8 bits per channel, RGB only.
-- Each image window uses its own WebGL context; browsers allow about 16 at
-  once, so close some images if a new one won't open.
+- Each open image window uses its own WebGL context (closed windows hand
+  theirs on to the next one); browsers allow about 16 at once, so close
+  some images if a new one won't open.
 - Layer sets don't nest (as in PS7).
 - Texture and Dual Brush, Wet Edges, vector masks, adjustment layers and
   type on a path come later.
@@ -667,6 +781,10 @@ Subject, Face-Aware Liquify and a Face Swap between two windows.
   merged person and use Subtract with a lasso, or refine on a layer mask.
 - Opening and saving use the webview's image codecs; TIFF, PSD and 16-bit
   arrive with the file-format milestone.
+- Only history is paged to the scratch disk: the open images themselves
+  (their current state) always stay in memory.
+- CMYK and Lab values in the Color Picker are uncalibrated (no color
+  profiles yet).
 
 ## Roadmap
 
@@ -678,7 +796,10 @@ painting engine for the artistic filters, and AI people selection; in
 Size, Free Transform, Levels / Curves / Color Balance, the retouching
 tools, Content-Aware Fill and layer styles; in 0.10 multi-layer
 selection, Ctrl for the Move tool, the pen and shape tools with shape
-layers and paths, and the rest of the PS7 toolbox.
+layers and paths, and the rest of the PS7 toolbox; in 0.11 Photoshop's
+keyboard and temporary tools, Auto-Select off by default, the full
+Preferences dialog, image resolution and units, scratch disks and crash
+recovery.
 Next is **M2: AI palette v1**: natural-language commands through Ollama tool
 calling, and image understanding with vision models.
 

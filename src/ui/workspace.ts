@@ -109,7 +109,9 @@ export class Workspace {
     private c: Containers,
   ) {
     for (const d of defs) this.defs.set(d.id, d);
-    this.layout = this.sanitize(storage.load<WorkspaceLayout | null>("workspace.current", null) ?? defaultLayout());
+    // Preferences > Save Palette Locations: off, every start begins with the default layout.
+    const saved = app.prefs.savePaletteLocations ? storage.load<WorkspaceLayout | null>("workspace.current", null) : null;
+    this.layout = this.sanitize(saved ?? defaultLayout());
     this.setupToolboxDrag();
     this.setupDockSplitter();
     new ResizeObserver(() => this.clampFloats()).observe(c.main);
@@ -184,6 +186,8 @@ export class Workspace {
 
   /** Window menu: show a palette (bring its group forward, or reopen it). */
   show(id: string): void {
+    // Showing a palette brings hidden palettes back (Tab / Shift+Tab).
+    this.chromeHidden = this.palettesHidden = false;
     if (this.layout.well.includes(id)) {
       this.openWell(id);
       return;
@@ -224,6 +228,7 @@ export class Workspace {
   }
 
   toggle(id: string): void {
+    if ((this.chromeHidden || this.palettesHidden) && !this.layout.well.includes(id)) return this.show(id);
     if (this.layout.well.includes(id)) this.isWellOpen(id) ? this.closeWell() : this.openWell(id);
     else this.isOpen(id) ? this.hide(id) : this.show(id);
   }
@@ -348,6 +353,15 @@ export class Workspace {
   private chromeHidden = false;
   toggleAllChrome(): void {
     this.chromeHidden = !this.chromeHidden;
+    this.palettesHidden = false;
+    this.render();
+  }
+
+  /** Shift+Tab: hide the palettes but keep the toolbox, options bar and status bar (PS7). */
+  private palettesHidden = false;
+  togglePalettes(): void {
+    this.palettesHidden = !this.palettesHidden;
+    this.chromeHidden = false;
     this.render();
   }
 
@@ -363,7 +377,8 @@ export class Workspace {
     // Grid columns: toolbox | document | dock.
     const docked = L.groups.filter((g) => g.dock === "right");
     const tbDocked = L.toolbox.visible && L.toolbox.dock === "left" && !hideAll;
-    const dockW = docked.length && !hideAll ? L.dockWidth : 0;
+    const hidePalettes = hideAll || this.palettesHidden;
+    const dockW = docked.length && !hidePalettes ? L.dockWidth : 0;
     main.style.gridTemplateColumns = `${tbDocked ? "var(--toolbox-w)" : "0"} 1fr ${dockW ? dockW + "px" : "0"}`;
     dock.style.display = dockW ? "" : "none";
     optionsBar.style.display = L.optionsBar && !hideAll ? "" : "none";
@@ -388,7 +403,7 @@ export class Workspace {
     for (const g of L.groups) {
       live.add(g.id);
       const node = this.renderGroup(g);
-      node.style.display = hideAll ? "none" : "";
+      node.style.display = hidePalettes ? "none" : "";
       if (g.dock === "right") {
         dock.append(node); // keeps array order
         node.classList.remove("floating");

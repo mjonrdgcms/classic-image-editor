@@ -193,6 +193,35 @@ export class Compositor {
     this.markDirty(null);
   }
 
+  /**
+   * Forget the document and free its textures so this context can show
+   * another image later. Browsers cap live WebGL contexts per page (WebKit
+   * keeps counting closed ones until garbage collection), so closed windows
+   * hand their context on instead of making new ones.
+   */
+  recycle(): void {
+    const gl = this.gl;
+    for (const map of [this.tileTex, this.maskTex] as Map<unknown, { tex: WebGLTexture }>[]) {
+      for (const e of map.values()) gl.deleteTexture(e.tex);
+      map.clear();
+    }
+    if (this.composite) gl.deleteTexture(this.composite);
+    if (this.compositeFbo) gl.deleteFramebuffer(this.compositeFbo);
+    if (this.selTex) gl.deleteTexture(this.selTex);
+    this.composite = this.compositeFbo = this.selTex = null;
+    this.fxSeen.clear();
+    this.selVersions = [];
+    this.selDirty = true;
+    this.overlayKey = "";
+    this.dirty.clear();
+    this.doc = null;
+    this.frameListeners.clear();
+    this.compositeListeners.clear();
+    this.maskView = { mode: "off", color: [1, 0, 0], opacity: 0.5 };
+    this.view = { zoom: 1, x: 0, y: 0 };
+    this.stats = { lastCompositeMs: 0, lastTiles: 0, frames: 0 };
+  }
+
   /** Stop showing a document (File > Close). */
   clear(): void {
     this.doc = null;

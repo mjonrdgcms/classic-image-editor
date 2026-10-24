@@ -7,6 +7,8 @@
  */
 
 import type { Document, DocSnapshot } from "./document";
+import { needsLoading } from "./scratch";
+import { EvictedTileError } from "./tiles";
 
 export interface HistoryState {
   label: string;
@@ -105,6 +107,8 @@ export class History {
 
   jump(i: number): void {
     if (i < 0 || i >= this.states.length || i === this.index) return;
+    // A state paged out to the scratch disk must be loaded first (App.historyJump does that).
+    if (needsLoading(this.states[i].snapshot)) throw new EvictedTileError();
     settlePendingEdits();
     this.index = i;
     this.doc.restore(this.states[i].snapshot);

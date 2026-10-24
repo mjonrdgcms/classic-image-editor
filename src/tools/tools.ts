@@ -4,20 +4,21 @@
  * by dispatching a command so History, Actions and the AI see the same thing.
  */
 
-import type { App, PaintToolId } from "../app";
+import type { App, AutoSelect, PaintToolId } from "../app";
 import { PaintTarget, Stroke } from "../core/brush";
 import { BrushPreset, presetToJSON } from "../core/brushes";
 import { moveSelectedPixels } from "../core/cmd/edit";
-import { movingSet } from "../core/cmd/layers";
+import { movingSet, pixelBounds } from "../core/cmd/layers";
 import type { Mask } from "../core/mask";
 import { shiftMask } from "../core/maskfx";
 import { makeTypeTool } from "../text/typetool";
 import { makeFaceSwapTool } from "./faceswaptool";
-import { makeTransformTool } from "./transformtool";
+import { makeTransformTool, startTransform } from "./transformtool";
 import { makeRetouchTools } from "./retouchtools";
 import { makeMoreTools } from "./moretools";
 import { makeVectorTools } from "./vectortools";
-import type { RGBA } from "../core/document";
+import type { Document, Layer, RGBA } from "../core/document";
+import type { TileGrid } from "../core/tiles";
 import type { SelectMode } from "../core/selection";
 import { Rect, rectUnion } from "../core/tiles";
 
@@ -135,6 +136,62 @@ function insideSelection(app: App, x: number, y: number): boolean {
   return !!s && !app.doc!.quickMask && s.get(Math.floor(x), Math.floor(y)) >= 128;
 }
 
+/** The Move tool's Auto-Select setting (tool presets from before 0.11 hold true / false). */
+export function autoSelectMode(v: AutoSelect | boolean | undefined): AutoSelect {
+  return v === true ? "layer" : v === "layer" || v === "set" ? v : "off";
+}
+
+/** The topmost visible layer with a visible pixel at (x, y) (its mask counts), or null. */
+export function layerUnder(doc: Document, x: number, y: number): Layer | null {
+  const px = Math.floor(x), py = Math.floor(y);
+  for (let i = doc.layers.length - 1; i >= 0; i--) {
+    const l = doc.layers[i];
+    if (!l.visible || doc.parentOf(l.id)?.visible === false) continue;
+    const lx = px - l.offsetX, ly = py - l.offsetY;
+    if (l.grid.getPixel(lx, ly)[3] === 0) continue;
+    if (l.mask && l.maskEnabled && lx >= 0 && ly >= 0 && lx < l.mask.width && ly < l.mask.height && l.mask.get(lx, ly) === 0) continue;
+    return l;
+  }
+  return null;
+}
+
+/** pixelBounds, remembered per grid until a tile changes (the bounding box redraws every frame while dragging). */
+const boundsCache = new WeakMap<TileGrid, { key: string; local: Rect | null }>();
+function layerBounds(l: Layer): Rect | null {
+  const key = l.grid.tiles.map((t) => (t ? t.version : 0)).join(",");
+  let c = boundsCache.get(l.grid);
+  if (!c || c.key !== key) {
+    const b = pixelBounds(l);
+    c = { key, local: b && { x: b.x - l.offsetX, y: b.y - l.offsetY, w: b.w, h: b.h } };
+    boundsCache.set(l.grid, c);
+  }
+  return c.local && { x: c.local.x + l.offsetX, y: c.local.y + l.offsetY, w: c.local.w, h: c.local.h };
+}
+
+/** The Move tool's bounding box: what Free Transform would transform (the active and other selected layers). */
+export function moveBounds(doc: Document): Rect | null {
+  const active = doc.activeLayer;
+  if (!active) return null;
+  let r: Rect | null = null;
+  for (const l of new Set([active, ...doc.selectedLayers])) if (l.visible && !(l.isBackground && l !== active)) r = rectUnion(r, layerBounds(l));
+  return r;
+}
+
+export const BOX_HANDLES: [number, number][] = [[0, 0], [0.5, 0], [1, 0], [1, 0.5], [1, 1], [0.5, 1], [0, 1], [0, 0.5]];
+
+/** Which bounding-box handle (if any) is under the pointer. */
+function boundsHandleAt(app: App, e: ToolEvent): number | null {
+  const doc = app.doc;
+  const b = doc && moveBounds(doc);
+  if (!b) return null;
+  const z = app.compositor.view.zoom;
+  for (let i = 0; i < BOX_HANDLES.length; i++) {
+    const [u, v] = BOX_HANDLES[i];
+    if (Math.abs(e.x - (b.x + b.w * u)) * z <= 5 && Math.abs(e.y - (b.y + b.h * v)) * z <= 5) return i;
+  }
+  return null;
+}
+
 export function createTools(app: App): Record<ToolId, Tool> {
   // ---------------- shared: dragging the selection outline ----------------
   let selDrag: { x: number; y: number; dx: number; dy: number } | null = null;
@@ -159,6 +216,7 @@ export function createTools(app: App): Record<ToolId, Tool> {
     let start: { x: number; y: number } | null = null;
     let mode: SelectMode = "replace";
     let fixedOrigin: { x: number; y: number } | null = null;
+    let lastMove: { x: number; y: number } | null = null;
     const shape = id === "ellipse" ? "ellipse" : "rect";
     const compute = (e: ToolEvent): Rect => {
       const s = app.settings;
@@ -207,11 +265,18 @@ export function createTools(app: App): Record<ToolId, Tool> {
         }
         start = app.snap(e.x, e.y);
         fixedOrigin = start;
+        lastMove = { x: e.x, y: e.y };
         app.preview.rect = { ...compute(e), shape };
       },
       move(e) {
         if (selDrag) return moveSelDrag(e);
         if (!start) return;
+        // Holding Space while dragging moves the marquee instead of resizing it (as in Photoshop).
+        if (app.isHeld("space") && lastMove) {
+          start = { x: start.x + e.x - lastMove.x, y: start.y + e.y - lastMove.y };
+          if (fixedOrigin) fixedOrigin = { x: fixedOrigin.x + e.x - lastMove.x, y: fixedOrigin.y + e.y - lastMove.y };
+        }
+        lastMove = { x: e.x, y: e.y };
         app.preview.rect = { ...compute(e), shape };
       },
       up(e) {
@@ -376,16 +441,40 @@ export function createTools(app: App): Record<ToolId, Tool> {
     const v = doc.guides.v.findIndex((x) => Math.abs(x - e.x) <= tol);
     return v >= 0 ? { orientation: "vertical", index: v } : null;
   };
+  // The Move tool's bounding box (Show Bounding Box).
+  app.overlayPainters.add((ctx, s, v) => {
+    if (app.active !== s || app.tool.id !== "move" || !app.settings.moveShowBounds || s.doc.selection || mv?.kind === "pixels") return;
+    const b = moveBounds(s.doc);
+    if (!b) return;
+    const x0 = Math.round(b.x * v.zoom + v.x) + 0.5, y0 = Math.round(b.y * v.zoom + v.y) + 0.5;
+    const x1 = Math.round((b.x + b.w) * v.zoom + v.x) + 0.5, y1 = Math.round((b.y + b.h) * v.zoom + v.y) + 0.5;
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = "#000";
+    ctx.strokeRect(x0, y0, x1 - x0, y1 - y0);
+    for (const [u, w] of BOX_HANDLES) {
+      const hx = Math.round(x0 + (x1 - x0) * u), hy = Math.round(y0 + (y1 - y0) * w);
+      ctx.fillStyle = "#fff";
+      ctx.fillRect(hx - 3, hy - 3, 7, 7);
+      ctx.strokeRect(hx - 2.5, hy - 2.5, 6, 6);
+    }
+  });
   const move: Tool = {
     id: "move",
     label: "Move Tool",
     shortcut: "V",
     icon: "move",
     cursor: "move",
-    hint: "Drag to move the layer, or the selected pixels (Alt-drag moves a copy). With an unlinked mask selected, drag moves just the mask. Drag guides to move them. Arrow keys nudge.",
+    hint: "Drag to move the selected layers (Auto-Select on the options bar picks what you click instead), or the selected pixels (Alt-drag moves a copy). Drag guides to move them. Arrow keys nudge.",
     hover(e) {
       const g = guideAt(e);
-      app.viewport.style.cursor = g ? (g.orientation === "horizontal" ? "ns-resize" : "ew-resize") : app.cursorFor(move);
+      const h = !g && app.settings.moveShowBounds && !app.doc?.selection ? boundsHandleAt(app, e) : null;
+      app.viewport.style.cursor = g
+        ? g.orientation === "horizontal"
+          ? "ns-resize"
+          : "ew-resize"
+        : h !== null
+          ? ["nwse-resize", "ns-resize", "nesw-resize", "ew-resize"][h % 4]
+          : app.cursorFor(move);
     },
     down(e) {
       const doc = app.doc!;
@@ -395,15 +484,22 @@ export function createTools(app: App): Record<ToolId, Tool> {
         app.preview.guide = { orientation: g.orientation, position: g.orientation === "horizontal" ? doc.guides.h[g.index] : doc.guides.v[g.index] };
         return;
       }
-      if (app.settings.moveAutoSelect || e.ctrl) {
-        for (let i = doc.layers.length - 1; i >= 0; i--) {
-          const l = doc.layers[i];
-          if (!l.visible) continue;
-          if (l.grid.getPixel(Math.floor(e.x) - l.offsetX, Math.floor(e.y) - l.offsetY)[3] > 0) {
-            // Clicking one of several selected layers keeps them all selected.
-            if (!doc.isSelected(l.id)) app.run("layer.select", { id: l.id });
-            break;
-          }
+      // Auto-Select (off by default): pick what was clicked. Ctrl-click flips it only if the preference says so.
+      let auto = autoSelectMode(app.settings.moveAutoSelect);
+      if (e.ctrl && app.prefs.ctrlAutoSelect) auto = auto === "off" ? "layer" : "off";
+      if (auto !== "off") {
+        const hit = layerUnder(doc, e.x, e.y);
+        const target = hit && (auto === "set" ? (doc.parentOf(hit.id) ?? hit) : hit);
+        // Clicking one of several selected layers keeps them all selected.
+        if (target && !doc.isSelected(target.id) && !(hit && doc.isSelected(hit.id))) app.run("layer.select", { id: target.id });
+      }
+      if (app.settings.moveShowBounds && !doc.selection) {
+        const h = boundsHandleAt(app, e);
+        if (h !== null) {
+          // Dragging a handle of the bounding box turns into Free Transform, carrying on with the same drag.
+          mv = null;
+          void startTransform(app, "layer").then((ok) => ok && app.handOverDrag("transform", e));
+          return;
         }
       }
       const node = doc.activeNode;
@@ -638,6 +734,10 @@ export function createTools(app: App): Record<ToolId, Tool> {
   let airbrushTimer = 0;
   let lastPos: [number, number, number] | null = null;
   const lastPoint: Record<PaintToolId, [number, number] | null> = { brush: null, pencil: null, eraser: null };
+  /** The Eraser's Erase to History (the History Brush engine); set once the retouch tools exist. */
+  let historyEraser: Tool | null = null;
+  /** The history eraser while it has the current stroke. */
+  let erasing: Tool | null = null;
 
   /** Where painting goes right now, or null (with a message) if it can't. */
   const target = (label: string): PaintTarget | null => {
@@ -690,9 +790,15 @@ export function createTools(app: App): Record<ToolId, Tool> {
           : "Drag to paint. Shift-click paints a straight line. [ and ] change size, number keys set opacity.",
       down(e) {
         const doc = app.doc!;
+        const s = app.settings;
+        // Erase to History (Alt flips it for this stroke): paint back the History palette's source.
+        if (kind === "eraser" && s.eraserToHistory !== e.alt && historyEraser && !doc.quickMask && !(doc.editMask && doc.activeNode?.mask)) {
+          erasing = historyEraser;
+          erasing.down({ ...e, alt: false });
+          return;
+        }
         const t = target(tool.label.toLowerCase());
         if (!t) return;
-        const s = app.settings;
         let brush = app.toolBrush[kind];
         let fg: RGBA = [...doc.foreground];
         let opacity = 100, flow = 100, mode = "normal";
@@ -749,11 +855,17 @@ export function createTools(app: App): Record<ToolId, Tool> {
         }
       },
       move(e) {
+        if (erasing) return erasing.move(e);
         if (!stroke) return;
         stroke.addPoint(e.x, e.y, e.pressure);
         lastPos = [e.x, e.y, e.pressure];
       },
-      up() {
+      up(e) {
+        if (erasing) {
+          const h = erasing;
+          erasing = null;
+          return h.up(e);
+        }
         clearInterval(airbrushTimer);
         if (!stroke) return;
         const s = stroke;
@@ -919,7 +1031,8 @@ export function createTools(app: App): Record<ToolId, Tool> {
 
   const more = makeMoreTools(app);
   const vec = makeVectorTools(app);
-  const { spotHeal, heal, ...retouch } = makeRetouchTools(app);
+  const { spotHeal, heal, eraseToHistory, ...retouch } = makeRetouchTools(app);
+  historyEraser = eraseToHistory;
   return {
     marquee: makeMarquee("marquee"),
     ellipse: makeMarquee("ellipse"),

@@ -1,8 +1,7 @@
 /** Color Range and Preferences dialogs. */
 
-import type { App, Preferences } from "../app";
-import { DEFAULT_PREFS } from "../app";
-import { el, formDialog, modal } from "./dialogs";
+import type { App } from "../app";
+import { el, modal } from "./dialogs";
 import { hex } from "./toolbox";
 import type { UIHooks } from "./actions";
 
@@ -90,48 +89,7 @@ export async function colorRangeDialog(app: App): Promise<void> {
   if (r === "ok") app.run("select.colorRange", { r: color[0], g: color[1], b: color[2], fuzziness: fuzz, mode: mode.value });
 }
 
-export async function preferencesDialog(app: App, ui: UIHooks): Promise<void> {
-  const p = app.prefs;
-  const r = await formDialog("Preferences", [
-    { key: "h1", label: "General", type: "heading" },
-    { key: "historyStates", label: "History States", type: "number", value: p.historyStates, min: 1, max: 1000, step: 1 },
-    { key: "theme", label: "Theme", type: "select", value: ui.themes().appearance.theme, options: ui.themes().all().map((t) => [t.id, t.name]) },
-    { key: "docMode", label: "Open Images In", type: "select", value: p.docMode, options: [["floating", "Floating Windows"], ["maximized", "Maximized (Tabbed) Windows"]] },
-    { key: "hT", label: "Tools", type: "heading" },
-    { key: "transformProportional", label: "Free Transform keeps proportions (Shift to scale freely)", type: "checkbox", value: p.transformProportional },
-    { key: "ctrlMove", label: "Hold Ctrl for the Move tool", type: "checkbox", value: p.ctrlMove },
-    { key: "h2", label: "Display & Cursors", type: "heading" },
-    { key: "paintingCursor", label: "Painting Cursors", type: "select", value: p.paintingCursor, options: [["standard", "Standard"], ["precise", "Precise"], ["brushSize", "Brush Size"]] },
-    { key: "otherCursor", label: "Other Cursors", type: "select", value: p.otherCursor, options: [["standard", "Standard"], ["precise", "Precise"]] },
-    { key: "h3", label: "Transparency", type: "heading" },
-    { key: "checkSize", label: "Grid Size", type: "select", value: String(p.checkSize), options: [["0", "None"], ["4", "Small"], ["8", "Medium"], ["16", "Large"]] },
-    { key: "checkColors", label: "Grid Colors", type: "select", value: p.checkColors, options: [["light", "Light"], ["medium", "Medium"], ["dark", "Dark"]] },
-    { key: "h4", label: "Guides & Grid", type: "heading" },
-    { key: "guideColor", label: "Guide Color", type: "color", value: p.guideColor },
-    { key: "gridColor", label: "Grid Color", type: "color", value: p.gridColor },
-    { key: "gridSpacing", label: "Gridline Every", type: "number", value: p.gridSpacing, min: 2, max: 2000, step: 1, suffix: "pixels" },
-    { key: "gridSubdivisions", label: "Subdivisions", type: "number", value: p.gridSubdivisions, min: 1, max: 100, step: 1 },
-    { key: "reset", label: "Reset all preferences to defaults", type: "checkbox", value: false },
-  ]);
-  if (!r) return;
-  if (r.reset) {
-    app.setPrefs({ ...DEFAULT_PREFS });
-    return;
-  }
-  if (r.theme !== ui.themes().appearance.theme) ui.themes().set({ theme: r.theme, custom: {} });
-  const patch: Partial<Preferences> = {
-    historyStates: Math.round(r.historyStates),
-    paintingCursor: r.paintingCursor,
-    otherCursor: r.otherCursor,
-    checkSize: +r.checkSize as Preferences["checkSize"],
-    checkColors: r.checkColors,
-    guideColor: r.guideColor,
-    gridColor: r.gridColor,
-    gridSpacing: Math.round(r.gridSpacing),
-    gridSubdivisions: Math.round(r.gridSubdivisions),
-    docMode: r.docMode,
-    transformProportional: !!r.transformProportional,
-    ctrlMove: !!r.ctrlMove,
-  };
-  app.setPrefs(patch);
+/** Edit > Preferences (see prefsdialog.ts). */
+export async function preferencesDialog(app: App, ui: UIHooks, section?: string): Promise<void> {
+  return (await import("./prefsdialog")).preferencesDialog(app, ui, section);
 }

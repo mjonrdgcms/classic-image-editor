@@ -360,18 +360,23 @@ export const imageCommands: CommandDef[] = [
   {
     name: "image.resize",
     label: "Image Size",
-    description: "Resample the whole image (every layer, mask and the selection) to a new width and height in pixels.",
+    description: "Resample the whole image (every layer, mask and the selection) to a new width and height in pixels, and/or set its resolution (pixels per inch, which only changes the print size).",
     params: {
       type: "object",
       properties: {
         width: { type: "integer", minimum: 1, maximum: MAX },
         height: { type: "integer", minimum: 1, maximum: MAX },
         method: { type: "string", enum: RESAMPLE_METHODS, default: "bicubic", description: "nearest, bilinear, bicubic or lanczos" },
+        resolution: { type: "number", minimum: 1, maximum: 30000, description: "Pixels per inch" },
       },
       required: ["width", "height"],
     },
     history: true,
-    run({ doc }, p: { width: number; height: number; method: ResampleMethod }) {
+    run({ doc }, p: { width: number; height: number; method: ResampleMethod; resolution?: number }) {
+      if (p.resolution !== undefined) {
+        doc.resolution = Math.round(p.resolution * 1000) / 1000;
+        doc.emit({ type: "size" });
+      }
       if (p.width === doc.width && p.height === doc.height) return;
       if (p.width * p.height > 400_000_000) throw new ValidationError("that image would be too large");
       resizeDocument(doc, p.width, p.height, p.method);

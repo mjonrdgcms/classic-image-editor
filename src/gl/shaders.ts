@@ -15,6 +15,7 @@ void main() { gl_Position = vec4(P[gl_VertexID], 0.0, 1.0); }
  */
 export const BLEND_FS = /* glsl */ `#version 300 es
 precision highp float;
+precision highp sampler2D;
 precision highp int;
 uniform sampler2D uBackdrop;   // work buffer (what's below)
 uniform sampler2D uSource;     // assembled layer source (or a finished set), same 256 space
@@ -121,6 +122,7 @@ void main() {
  */
 export const ASSEMBLE_FS = /* glsl */ `#version 300 es
 precision highp float;
+precision highp sampler2D;
 precision highp int;
 uniform sampler2D uTile;       // layer pixels tile (RGBA)
 uniform sampler2D uMaskTex;    // layer mask tile (R)
@@ -148,6 +150,7 @@ void main() {
 /** Multiply a work buffer's alpha by a mask tile (an isolated set's mask). */
 export const MASKMUL_FS = /* glsl */ `#version 300 es
 precision highp float;
+precision highp sampler2D;
 precision highp int;
 uniform sampler2D uSource;
 uniform sampler2D uMaskTex;
@@ -165,6 +168,7 @@ void main() {
 /** Fade a Pass Through set's effect by its opacity and mask (premultiplied mix). */
 export const FADE_FS = /* glsl */ `#version 300 es
 precision highp float;
+precision highp sampler2D;
 precision highp int;
 uniform sampler2D uSaved;
 uniform sampler2D uCurrent;
@@ -188,6 +192,7 @@ void main() {
 /** Draw the composite to the screen over a checkerboard, with zoom and pan. */
 export const DISPLAY_FS = /* glsl */ `#version 300 es
 precision highp float;
+precision highp sampler2D;
 uniform sampler2D uImage;
 uniform vec2 uDocSize;      // canvas pixels
 uniform vec2 uOffset;       // device px of the canvas's top-left on screen

@@ -103,6 +103,7 @@ void main() {
 
 const FS = `#version 300 es
 precision highp float;
+precision highp sampler2D;
 in vec2 vF;
 uniform vec2 uField;
 uniform sampler2D uSrc;
@@ -263,7 +264,7 @@ class Preview {
     const gl = this.gl;
     for (const t of Object.values(this.tex)) gl.deleteTexture(t);
     gl.deleteProgram(this.prog);
-    gl.getExtension("WEBGL_lose_context")?.loseContext();
+    if (!gl.isContextLost()) gl.getExtension("WEBGL_lose_context")?.loseContext();
   }
 }
 

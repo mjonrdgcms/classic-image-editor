@@ -25,7 +25,7 @@ import type { ThemeManager } from "./theme";
 import type { FilterRunner } from "./filterrun";
 import type { ActionPlayer } from "./actionspal";
 import { FILTER_MAP } from "../filters";
-import { BLEND_LABELS, BLEND_MODES } from "../core/blend";
+import { BLEND_LABELS, BLEND_MODES, type BlendMode } from "../core/blend";
 import { canFade } from "../core/cmd/filters";
 import type { Workspace } from "./workspace";
 import type { TypeTool } from "../text/typetool";
@@ -95,6 +95,99 @@ export function createActions(app: App, ui: UIHooks) {
   });
 
   const sel = () => app.hasDoc && !!app.doc!.selection;
+
+  /** Edit > Purge: can't be undone, so ask first (as Photoshop does). */
+  const purge = async (what: "undo" | "clipboard" | "histories" | "all", desc: string) => {
+    if (await confirmDialog("Purge", `This will free memory by clearing ${desc}. It can't be undone.`, "Purge")) app.purge(what);
+  };
+
+  /** Alt+[ / Alt+]: the next layer down / up as the Layers palette shows it (Shift: bottom / top). */
+  const stepLayer = (dir: "up" | "down" | "top" | "bottom") => {
+    const doc = app.doc!;
+    const rows: number[] = [];
+    for (const n of [...doc.stack].reverse()) {
+      rows.push(n.id);
+      if (n.kind === "group" && n.expanded) for (const c of [...n.children].reverse()) rows.push(c.id);
+    }
+    if (!rows.length) return;
+    const i = rows.indexOf(doc.activeLayerId);
+    const j = dir === "top" ? 0 : dir === "bottom" ? rows.length - 1 : Math.max(0, Math.min(rows.length - 1, (i < 0 ? 0 : i) + (dir === "up" ? -1 : 1)));
+    if (rows[j] !== doc.activeLayerId || doc.selectedIds.size) app.run("layer.select", { id: rows[j] });
+  };
+
+  /** The blend mode the keys change: the painting tool's mode, or else the active layer's. */
+  const blendTarget = (): { modes: string[]; get(): string; set(m: string): void } | null => {
+    const doc = app.doc;
+    if (!doc) return null;
+    const t = app.baseTool.id;
+    const key = t === "brush" ? "brushMode" : t === "pencil" ? "pencilMode" : t === "gradient" ? "gradientMode" : null;
+    if (key) {
+      return {
+        modes: [...BLEND_MODES, "behind", "clear"],
+        get: () => app.settings[key],
+        set: (m) => {
+          app.settings[key] = m;
+          app.emit("settings");
+          app.status(`${t === "brush" ? "Brush" : t === "pencil" ? "Pencil" : "Gradient"} mode: ${m === "behind" ? "Behind" : m === "clear" ? "Clear" : BLEND_LABELS[m as BlendMode].replace(/^-/, "")}`);
+        },
+      };
+    }
+    const n = doc.activeNode;
+    if (!n || (n.kind === "layer" && n.isBackground)) return null;
+    return {
+      modes: n.kind === "group" ? ["passThrough", ...BLEND_MODES] : [...BLEND_MODES],
+      get: () => n.blendMode,
+      set: (m) => void app.run("layer.setProperties", { blendMode: m }),
+    };
+  };
+  const cycleBlend = (d: 1 | -1) => {
+    const b = blendTarget();
+    if (!b) return;
+    // Behind and Clear are only reached by their own keys, as in Photoshop.
+    const ring = b.modes.filter((m) => m !== "behind" && m !== "clear");
+    const i = ring.indexOf(b.get());
+    b.set(ring[(i + d + ring.length) % ring.length]);
+  };
+  /** Alt+Shift+letter: a blend mode, as in Photoshop. */
+  const blendKeys = (): Record<string, UIAction> => {
+    const keys: [string, string][] = [
+      ["normal", "N"], ["dissolve", "I"], ["darken", "K"], ["multiply", "M"], ["colorBurn", "B"], ["linearBurn", "A"],
+      ["lighten", "G"], ["screen", "S"], ["colorDodge", "D"], ["linearDodge", "W"], ["overlay", "O"], ["softLight", "F"],
+      ["hardLight", "H"], ["vividLight", "V"], ["linearLight", "J"], ["pinLight", "Z"], ["difference", "E"], ["exclusion", "X"],
+      ["hue", "U"], ["saturation", "T"], ["color", "C"], ["luminosity", "Y"], ["behind", "Q"], ["clear", "R"],
+    ];
+    const out: Record<string, UIAction> = {};
+    for (const [mode, k] of keys) {
+      const label = mode === "behind" ? "Behind" : mode === "clear" ? "Clear" : BLEND_LABELS[mode as BlendMode].replace(/^-/, "");
+      out[`blend_${mode}`] = {
+        label: `Blend Mode: ${label}`,
+        shortcut: `Alt+Shift+${k}`,
+        enabled: hasDoc,
+        run: () => {
+          const b = blendTarget();
+          if (b && b.modes.includes(mode)) b.set(mode);
+        },
+      };
+    }
+    return out;
+  };
+  /** F5-F9 show or hide palettes, as in PS7. */
+  const paletteKey = (id: string, label: string, shortcut: string): UIAction => ({
+    label: `Show/Hide ${label}`,
+    shortcut,
+    checked: () => ui.workspace().isOpen(id) || ui.workspace().isWellOpen(id),
+    run: () => ui.workspace().toggle(id),
+  });
+  const scroll = (label: string, shortcut: string, dx: number, dy: number, small = false): UIAction => ({
+    label,
+    shortcut,
+    enabled: hasDoc,
+    run: () => {
+      const vp = app.viewport;
+      const step = (v: number, screen: number) => (small ? v * 10 : v * screen * 0.9);
+      app.panBy(-step(dx, vp.clientWidth), -step(dy, vp.clientHeight));
+    },
+  });
 
   const modifyDialog = async (op: "border" | "smooth" | "expand" | "contract") => {
     const titles = { border: ["Border Selection", "Width"], smooth: ["Smooth Selection", "Sample Radius"], expand: ["Expand Selection", "Expand By"], contract: ["Contract Selection", "Contract By"] };
@@ -361,24 +454,36 @@ export function createActions(app: App, ui: UIHooks) {
       shortcut: "Ctrl+Alt+S",
       enabled: hasDoc,
       async run() {
-        const q = await jpegOptionsDialog();
+        const q = await jpegOptionsDialog(app.prefs.jpegQuality);
         if (q !== null) await app.save("jpeg", q);
       },
     },
 
     // Edit
     undo: {
+      // Preferences > Redo Key: PS7's Ctrl+Z toggle, or multi-level undo.
       get label() {
         const h = app.bus.history;
-        if (h.lastWasUndo && h.canRedo()) return `Redo ${h.states[h.index + 1].label}`;
+        if (app.prefs.redoKey === "ctrlZ" && h.lastWasUndo && h.canRedo()) return `Redo ${h.states[h.index + 1].label}`;
         return h.canUndo() ? `Undo ${h.current!.label}` : "Undo";
       },
       shortcut: "Ctrl+Z",
-      enabled: () => app.hasDoc && (app.bus.history.canUndo() || app.bus.history.canRedo()),
-      run: () => app.bus.history.toggle(),
+      enabled: () => app.hasDoc && (app.bus.history.canUndo() || (app.prefs.redoKey === "ctrlZ" && app.bus.history.canRedo())),
+      run: () => void app.historyMove(app.prefs.redoKey === "ctrlZ" ? "toggle" : "back"),
     },
-    stepForward: { label: "Step Forward", shortcut: "Ctrl+Shift+Z", enabled: () => app.hasDoc && app.bus.history.canRedo(), run: () => app.bus.history.redo() },
-    stepBackward: { label: "Step Backward", shortcut: "Ctrl+Alt+Z", enabled: () => app.hasDoc && app.bus.history.canUndo(), run: () => app.bus.history.undo() },
+    redo: {
+      get label() {
+        const h = app.bus.history;
+        return h.canRedo() ? `Redo ${h.states[h.index + 1].label}` : "Redo";
+      },
+      get shortcut() {
+        return app.prefs.redoKey === "ctrlY" ? "Ctrl+Y" : "";
+      },
+      enabled: () => app.hasDoc && app.bus.history.canRedo(),
+      run: () => void app.historyMove("forward"),
+    },
+    stepForward: { label: "Step Forward", shortcut: "Ctrl+Shift+Z", enabled: () => app.hasDoc && app.bus.history.canRedo(), run: () => void app.historyMove("forward") },
+    stepBackward: { label: "Step Backward", shortcut: "Ctrl+Alt+Z", enabled: () => app.hasDoc && app.bus.history.canUndo(), run: () => void app.historyMove("back") },
     cut: { label: "Cut", shortcut: "Ctrl+X", enabled: () => sel() && !!app.doc!.activeLayer, run: () => copy(false, true) },
     copy: { label: "Copy", shortcut: "Ctrl+C", enabled: () => app.hasDoc && !!app.doc!.activeLayer, run: () => copy(false) },
     copyMerged: { label: "Copy Merged", shortcut: "Ctrl+Shift+C", enabled: hasDoc, run: () => copy(true) },
@@ -413,9 +518,22 @@ export function createActions(app: App, ui: UIHooks) {
     contentAwareFill: { label: "Content-Aware Fill", shortcut: "Shift+Backspace", enabled: () => app.hasDoc && !!app.doc?.activeLayer, run: contentAwareFill },
     fillFg: cmd("edit.fill", "Alt+Backspace", { use: "foreground" }, "Fill with Foreground"),
     fillBg: cmd("edit.fill", "Ctrl+Backspace", { use: "background" }, "Fill with Background"),
+    fillFgKeep: cmd("edit.fill", "Shift+Alt+Backspace", { use: "foreground", preserveTransparency: true }, "Fill with Foreground (Preserve Transparency)"),
+    fillBgKeep: cmd("edit.fill", "Ctrl+Shift+Backspace", { use: "background", preserveTransparency: true }, "Fill with Background (Preserve Transparency)"),
+    purgeUndo: { label: "Undo", enabled: () => app.hasDoc && app.bus.history.states.length > 1, run: () => void purge("undo", "the history of this image") },
+    purgeClipboard: { label: "Clipboard", enabled: () => !!app.bus.clipboard, run: () => void purge("clipboard", "the clipboard") },
+    purgeHistories: { label: "Histories", enabled: () => app.sessions.some((s) => s.history.states.length > 1), run: () => void purge("histories", "the history of every open image") },
+    purgeAll: { label: "All", enabled: () => !!app.bus.clipboard || app.sessions.some((s) => s.history.states.length > 1), run: () => void purge("all", "the clipboard and the history of every open image") },
+    transformAgain: {
+      label: "Again",
+      shortcut: "Ctrl+Shift+T",
+      enabled: () => app.hasDoc,
+      run: async () => (await import("../tools/transformtool")).transformAgain(app),
+    },
     defineBrush: { label: "Define Brush...", enabled: sel, run: defineBrush },
     keyboardShortcuts: { label: "Keyboard Shortcuts...", shortcut: "Ctrl+Alt+Shift+K", run: () => ui.shortcutEditor() },
-    preferences: { label: "Preferences...", shortcut: "Ctrl+K", run: () => preferencesDialog(app, ui) },
+    preferences: { label: "Preferences...", shortcut: "Ctrl+K", run: () => preferencesDialog(app, ui, "general") },
+    preferencesLast: { label: "Last Preferences Section...", shortcut: "Ctrl+Alt+K", run: () => preferencesDialog(app, ui, undefined) },
 
     // Image
     cropToSelection: {
@@ -609,6 +727,21 @@ export function createActions(app: App, ui: UIHooks) {
       run: () => void app.run("layer.mergeDown"),
     },
     mergeVisible: cmd("layer.mergeVisible", "Ctrl+Shift+E"),
+    stampVisible: cmd("layer.stampVisible", "Ctrl+Alt+Shift+E", {}, "Merge Visible to New Layer"),
+    selectLayerUp: { label: "Select Next Layer Up", shortcut: "Alt+]", enabled: hasDoc, run: () => stepLayer("up") },
+    selectLayerDown: { label: "Select Next Layer Down", shortcut: "Alt+[", enabled: hasDoc, run: () => stepLayer("down") },
+    selectTopLayer: { label: "Select Top Layer", shortcut: "Shift+Alt+]", enabled: hasDoc, run: () => stepLayer("top") },
+    selectBottomLayer: { label: "Select Bottom Layer", shortcut: "Shift+Alt+[", enabled: hasDoc, run: () => stepLayer("bottom") },
+    lockTransparency: {
+      label: "Lock Transparent Pixels",
+      shortcut: "/",
+      enabled: () => app.hasDoc && !!app.doc!.activeLayer && !app.doc!.activeLayer.isBackground,
+      checked: () => !!app.doc?.activeLayer?.locks.transparency,
+      run: () => void app.run("layer.setLocks", { transparency: !app.doc!.activeLayer!.locks.transparency }),
+    },
+    blendNext: { label: "Next Blend Mode", shortcut: "Shift+=", enabled: hasDoc, run: () => cycleBlend(1) },
+    blendPrev: { label: "Previous Blend Mode", shortcut: "Shift+-", enabled: hasDoc, run: () => cycleBlend(-1) },
+    ...blendKeys(),
 
     // Select
     selectAll: cmd("select.all", "Ctrl+A"),
@@ -694,8 +827,8 @@ export function createActions(app: App, ui: UIHooks) {
     },
 
     // View
-    zoomIn: { label: "Zoom In", shortcut: "Ctrl+=", enabled: hasDoc, run: () => app.zoomStep(1) },
-    zoomOut: { label: "Zoom Out", shortcut: "Ctrl+-", enabled: hasDoc, run: () => app.zoomStep(-1) },
+    zoomIn: { label: "Zoom In", shortcut: "Ctrl+=", enabled: hasDoc, run: () => app.keyboardZoom(1) },
+    zoomOut: { label: "Zoom Out", shortcut: "Ctrl+-", enabled: hasDoc, run: () => app.keyboardZoom(-1) },
     fit: { label: "Fit on Screen", shortcut: "Ctrl+0", enabled: hasDoc, run: () => app.fitOnScreen() },
     actual: { label: "Actual Pixels", shortcut: "Ctrl+Alt+0", enabled: hasDoc, run: () => app.actualPixels() },
     extras: view("extras", "Extras", "Ctrl+H"),
@@ -729,6 +862,22 @@ export function createActions(app: App, ui: UIHooks) {
 
     // Window
     toggleChrome: { label: "Show/Hide Palettes", shortcut: "Tab", run: () => ui.workspace().toggleAllChrome() },
+    togglePalettes: { label: "Show/Hide Palettes (Keep Toolbox)", shortcut: "Shift+Tab", run: () => ui.workspace().togglePalettes() },
+    paletteBrushes: paletteKey("brushes", "Brushes", "F5"),
+    paletteColor: paletteKey("color", "Color", "F6"),
+    paletteLayers: paletteKey("layers", "Layers", "F7"),
+    paletteInfo: paletteKey("info", "Info", "F8"),
+    paletteActions: paletteKey("actions", "Actions", "F9"),
+    scrollUp: scroll("Scroll Up One Screen", "PageUp", 0, -1),
+    scrollDown: scroll("Scroll Down One Screen", "PageDown", 0, 1),
+    scrollLeft: scroll("Scroll Left One Screen", "Ctrl+PageUp", -1, 0),
+    scrollRight: scroll("Scroll Right One Screen", "Ctrl+PageDown", 1, 0),
+    scrollUpSmall: scroll("Scroll Up 10 Pixels", "Shift+PageUp", 0, -1, true),
+    scrollDownSmall: scroll("Scroll Down 10 Pixels", "Shift+PageDown", 0, 1, true),
+    scrollLeftSmall: scroll("Scroll Left 10 Pixels", "Ctrl+Shift+PageUp", -1, 0, true),
+    scrollRightSmall: scroll("Scroll Right 10 Pixels", "Ctrl+Shift+PageDown", 1, 0, true),
+    scrollTopLeft: { label: "Go to Top-Left Corner", shortcut: "Home", enabled: hasDoc, run: () => app.scrollToCorner("start") },
+    scrollBottomRight: { label: "Go to Bottom-Right Corner", shortcut: "End", enabled: hasDoc, run: () => app.scrollToCorner("end") },
     toggleToolbox: { label: "Tools", checked: () => ui.workspace().layout.toolbox.visible, run: () => ui.workspace().setToolboxVisible(!ui.workspace().layout.toolbox.visible) },
     toggleOptions: { label: "Options", checked: () => ui.workspace().layout.optionsBar, run: () => ui.workspace().setOptionsBar(!ui.workspace().layout.optionsBar) },
     toggleStatus: { label: "Status Bar", checked: () => ui.workspace().layout.statusBar, run: () => ui.workspace().setStatusBar(!ui.workspace().layout.statusBar) },
@@ -844,6 +993,7 @@ export function createActions(app: App, ui: UIHooks) {
     histogram: { label: "Histogram...", enabled: hasDoc, run: async () => (await import("./histogram")).histogramDialog(app) },
     autoLevels: adj("autoLevels", "Ctrl+Shift+L", true),
     autoContrast: adj("autoContrast", "Ctrl+Alt+Shift+L", true),
+    autoColor: adj("autoColor", "Ctrl+Shift+B", true),
     equalize: adj("equalize", undefined, true),
     threshold: adj("threshold"),
     posterize: adj("posterizeFx"),

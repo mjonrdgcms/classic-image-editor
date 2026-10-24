@@ -169,14 +169,18 @@ export function makeMoreTools(app: App): Record<"patch" | "magneticLasso" | "col
       doc.slices.forEach((sl, i) => {
         const [x, y] = toS(sl.x, sl.y);
         const w = sl.w * v.zoom, h = sl.h * v.zoom;
+        // Preferences > Guides, Grid & Slices: line color and numbers.
+        const c = sl.id === sel ? "#ffb000" : app.prefs.sliceColor;
         ctx.lineWidth = sl.id === sel ? 2 : 1;
-        ctx.strokeStyle = sl.id === sel ? "#ffb000" : "rgba(64,160,255,.95)";
+        ctx.strokeStyle = c;
         ctx.strokeRect(Math.round(x) + 0.5, Math.round(y) + 0.5, Math.round(w), Math.round(h));
-        const label = String(i + 1).padStart(2, "0");
-        ctx.fillStyle = sl.id === sel ? "#ffb000" : "rgba(64,160,255,.95)";
-        ctx.fillRect(Math.round(x) + 1, Math.round(y) + 1, 22, 15);
-        ctx.fillStyle = "#fff";
-        ctx.fillText(label, Math.round(x) + 5, Math.round(y) + 12);
+        if (app.prefs.showSliceNumbers || sl.id === sel) {
+          const label = String(i + 1).padStart(2, "0");
+          ctx.fillStyle = c;
+          ctx.fillRect(Math.round(x) + 1, Math.round(y) + 1, 22, 15);
+          ctx.fillStyle = "#fff";
+          ctx.fillText(label, Math.round(x) + 5, Math.round(y) + 12);
+        }
       });
     }
     // Notes.
