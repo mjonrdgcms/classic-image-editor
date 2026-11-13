@@ -114,7 +114,7 @@ export function mountOptionsBar(root: HTMLElement, app: App, openBrushes: () => 
       const items: MenuItem[] = app.brushes.map((p) => ({
         label: p.name,
         run: () => {
-          const id = app.tool.id as import("../app").BrushToolId;
+          const id = app.baseTool.id as import("../app").BrushToolId;
           app.toolBrush[id] = presetFromJSON(JSON.parse(JSON.stringify(presetToJSON(p))));
           app.emit("brushes");
         },
@@ -123,7 +123,7 @@ export function mountOptionsBar(root: HTMLElement, app: App, openBrushes: () => 
       showPopupMenu(items, r.left, r.bottom);
     });
     const sync = () => {
-      const b = app.activeBrush;
+      const b = app.baseBrush;
       btn.textContent = "";
       if (!b) return;
       btn.append(dabThumb(b, 22, 22), el("span", { text: String(Math.round(b.size)) }), el("span", { class: "caret", text: "▾" }));
@@ -151,12 +151,12 @@ export function mountOptionsBar(root: HTMLElement, app: App, openBrushes: () => 
     const b = el("button", { type: "button", class: "icon-btn airbrush", title: "Enable airbrush capabilities", "aria-label": "Airbrush" });
     b.innerHTML = ICONS.brush;
     b.addEventListener("click", () => {
-      const br = app.activeBrush;
+      const br = app.baseBrush;
       if (!br) return;
       br.airbrush = !br.airbrush;
       app.emit("brushes");
     });
-    return { node: b, sync: () => b.classList.toggle("active", !!app.activeBrush?.airbrush) };
+    return { node: b, sync: () => b.classList.toggle("active", !!app.baseBrush?.airbrush) };
   };
 
   /** A small canvas showing a gradient preset (or a type's shape). */
@@ -595,7 +595,8 @@ export function mountOptionsBar(root: HTMLElement, app: App, openBrushes: () => 
   };
 
   app.on("tool", render);
-  app.on("doc", () => (app.tool.id === "type" || app.tool.id === "faceSwap" || app.tool.id === "move") && parts.forEach((p) => p.sync()));
+  // (The bar shows the chosen tool's options even while Space, Ctrl or Alt borrows another tool.)
+  app.on("doc", () => ["type", "faceSwap", "move"].includes(app.baseTool.id) && parts.forEach((p) => p.sync()));
   app.on("settings", () => parts.forEach((p) => p.sync()));
   app.on("brushes", () => parts.forEach((p) => p.sync()));
   app.on("prefs", () => parts.forEach((p) => p.sync()));

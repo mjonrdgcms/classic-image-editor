@@ -1056,6 +1056,11 @@ export class App {
     return this.toolBrush[id] ?? null;
   }
 
+  /** The chosen tool's brush, even while a held key borrows another tool (the options bar shows this one). */
+  get baseBrush(): BrushPreset | null {
+    return this.toolBrush[this.baseTool.id as BrushToolId] ?? null;
+  }
+
   /** Snap a canvas point to guides and grid lines within 6 screen pixels. */
   snap(x: number, y: number): { x: number; y: number } {
     if (!this.doc || !this.view.snap || !this.view.extras) return { x, y };

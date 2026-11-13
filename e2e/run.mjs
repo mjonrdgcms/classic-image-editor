@@ -1625,6 +1625,7 @@ check("pan never re-blends layers", perf.pan < perf.full / 5);
   await settle();
   await page.keyboard.up("Control");
   check("Ctrl+arrows nudge the layer with the Brush selected (Shift: 10 px)", (await off()) === "3,10" && (await ev(() => window.editor.app.tool.id)) === "brush", await off());
+  check("the options bar keeps showing the Brush while Ctrl borrows the Move tool", /^\d+$/.test((await ev(() => document.querySelector("#optionsbar .brush-pick span")?.textContent)) ?? ""));
   check("a run of nudges is one History state", (await states()) - n1 === 1 && (await lastLabel()) === "Nudge", `${(await states()) - n1} ${await lastLabel()}`);
   await ev(() => window.editor.app.historyMove("back"));
   check("one undo takes the whole run back", (await off()) === "0,0", await off());

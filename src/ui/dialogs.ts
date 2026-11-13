@@ -215,7 +215,7 @@ export async function newDocumentDialog(app: App): Promise<NewDocOptions | null>
   const size = el("span", { style: "color:var(--text-dim)" });
   const updateSize = () => {
     const bytes = Math.max(0, +width.value) * Math.max(0, +height.value) * 3;
-    size.textContent = `Image Size: ${bytes >= 1048576 ? (bytes / 1048576).toFixed(1) + "M" : Math.ceil(bytes / 1024) + "K"}`;
+    size.textContent = bytes >= 1048576 ? (bytes / 1048576).toFixed(1) + "M" : Math.ceil(bytes / 1024) + "K";
   };
   updateSize();
   width.addEventListener("input", updateSize);
