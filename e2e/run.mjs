@@ -839,7 +839,9 @@ check("Ctrl+Z is ignored in the middle of a stroke", (await lastLabel()) === "Br
   check("density lets 40% of the hidden area through", Math.abs(px[0] - Math.round(255 - 0.4 * (255 - 40))) <= 2, px.join(","));
   await page.screenshot({ path: out + "16-masks-palette.png" });
 
-  // Unlink, then the Move tool moves only the mask while editing it.
+  // Unlink, then the Move tool moves only the mask while editing it (after the palettes redraw from the density change).
+  await page.waitForTimeout(150);
+  await settle();
   await page.locator(".layer-row.active .mask-link").click();
   check("chain button unlinks the mask", (await ev(() => window.editor.app.doc.activeLayer.maskLinked)) === false);
   await ev(() => window.editor.app.bus.dispatch("layer.editMask", { edit: true }));
