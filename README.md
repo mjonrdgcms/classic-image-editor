@@ -1,5 +1,7 @@
 # Classic Image Editor
 
+> **Just want the app?** [Download it here](https://github.com/mjonrdgcms/classic-image-editor/releases/latest), then follow the [easy install guide](INSTALL.md) for Mac, Windows or Linux.
+
 A fast, offline desktop image editor in the spirit of the classic Photoshop 7
 workflow, with a local AI assistant (via Ollama) on the roadmap.
 
@@ -7,15 +9,19 @@ workflow, with a local AI assistant (via Ollama) on the roadmap.
 
 ## Download
 
-Get the latest version from the repository's **Releases** page.
+**[⬇ Download the latest version](https://github.com/mjonrdgcms/classic-image-editor/releases/latest)**: scroll down to **Assets** and pick the file for your computer.
 
-| System | Files | Notes |
+**Never installed an app from GitHub? Read the [step-by-step install guide](INSTALL.md)** ([Mac](INSTALL.md#mac) · [Windows](INSTALL.md#windows) · [Linux](INSTALL.md#linux)).
+
+| System | Download | First launch |
 | --- | --- | --- |
-| Windows 10/11 | `Classic-Image-Editor_X_x64-setup.exe`, or the portable `_x64-portable.exe` | Not code-signed: at the SmartScreen prompt choose More info > Run anyway. |
-| macOS 11 Big Sur or later (Apple silicon and Intel) | `Classic-Image-Editor_X_macOS-universal.dmg` | Open the disk image and drag the app to Applications. The app isn't notarized by Apple yet, so the first time, right-click it and choose **Open** (or allow it under System Settings > Privacy & Security). |
+| macOS 11 Big Sur or later (Apple silicon and Intel) | `Classic-Image-Editor_X_macOS-universal.dmg` | Open it and drag the app to Applications. Not notarized by Apple, so allow it once: on macOS 15 Sequoia or newer, try to open it, then System Settings > Privacy & Security > **Open Anyway**; on older macOS, right-click the app > **Open**. [Details](INSTALL.md#mac) |
+| Windows 10/11 | `Classic-Image-Editor_X_x64-setup.exe`, or the portable `_x64-portable.exe` | Not code-signed: at "Windows protected your PC" choose **More info > Run anyway**. |
 | Ubuntu 22.04+, Debian 12+, Mint | `Classic-Image-Editor_X_amd64.deb` | `sudo apt install ./Classic-Image-Editor_X_amd64.deb` |
 | Fedora, openSUSE, RHEL | `Classic-Image-Editor-X-1.x86_64.rpm` | `sudo dnf install ./Classic-Image-Editor-X-1.x86_64.rpm` |
 | Any 64-bit Linux | `Classic-Image-Editor_X_amd64.AppImage` | `chmod +x` it and run it; no install needed. |
+
+Ignore the "Source code" zips on the release page; those are the code, not the app.
 
 All of these are built by `.github/workflows/desktop.yml`. To publish a
 new version: bump the version (package.json, src-tauri/tauri.conf.json,

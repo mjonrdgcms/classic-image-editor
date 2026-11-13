@@ -1,4 +1,20 @@
 <!-- Notes for the next GitHub release (Desktop builds workflow). {{VERSION}} becomes the version in package.json; checksums are added automatically. -->
+## Which file do I download?
+
+Scroll down to **Assets** below and click the one file for your computer:
+
+| Your computer | Download this |
+| --- | --- |
+| **Mac** (Apple silicon or Intel) | **Classic-Image-Editor_{{VERSION}}_macOS-universal.dmg** |
+| **Windows** 10/11 | **Classic-Image-Editor_{{VERSION}}_x64-setup.exe** |
+| **Linux** | **Classic-Image-Editor_{{VERSION}}_amd64.AppImage** (or the .deb / .rpm) |
+
+Ignore the "Source code" files; those aren't the app.
+
+**First time installing an app from GitHub?** Follow the step-by-step guide: **[How to install Classic Image Editor](https://github.com/mjonrdgcms/classic-image-editor/blob/main/INSTALL.md)**. On a Mac, the first time you open the app you'll need to allow it once in **System Settings → Privacy & Security → Open Anyway** ([Mac steps](https://github.com/mjonrdgcms/classic-image-editor/blob/main/INSTALL.md#mac)).
+
+---
+
 Classic Image Editor is a fast, offline desktop image editor in the spirit of the classic Photoshop 7 workflow. Free and open source (MIT).
 
 **New in 0.13.0:**
@@ -19,7 +35,7 @@ Requires Microsoft Edge WebView2, which comes preinstalled on Windows 10/11.
 - **Classic-Image-Editor_{{VERSION}}_macOS-universal.dmg**: open it and drag the app to Applications.
 - **Classic-Image-Editor_{{VERSION}}_macOS-universal.app.zip**: the same app as a zip.
 
-> Not notarized by Apple yet. The first time, right-click the app and choose **Open**, then **Open** again (or allow it under System Settings → Privacy & Security). On a Mac, Command does what Ctrl does in the docs, and Option is Alt.
+> Not notarized by Apple yet, so macOS blocks it the first time. **macOS 15 Sequoia or newer:** double-click the app, click **Done**, then go to System Settings → Privacy & Security, scroll down, click **Open Anyway** and enter your password. **macOS 14 or older:** right-click the app, choose **Open**, then **Open**. If it says the app "is damaged", run `xattr -cr "/Applications/Classic Image Editor.app"` in Terminal. [Full Mac steps](https://github.com/mjonrdgcms/classic-image-editor/blob/main/INSTALL.md#mac). On a Mac, Command does what Ctrl does in the docs, and Option is Alt.
 
 ### Linux (64-bit: Ubuntu 22.04+, Debian 12+, Fedora 36+ or similar)
 - **Classic-Image-Editor_{{VERSION}}_amd64.deb**: Ubuntu, Debian, Mint: `sudo apt install ./Classic-Image-Editor_{{VERSION}}_amd64.deb`
