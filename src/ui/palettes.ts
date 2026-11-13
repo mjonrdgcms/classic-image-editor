@@ -645,6 +645,44 @@ function layers(app: App, actions: Actions): PaletteParts {
     return [chain, badge];
   };
 
+  /** Right-click on a layer or set: the layer commands that apply to it, merging and flattening last. */
+  const layerContextMenu = (): MenuItem[] => {
+    const doc = app.doc!;
+    const n = doc.activeNode;
+    const l = doc.activeLayer;
+    const several = doc.selectedNodes.length > 1;
+    const items: MenuItem[] = [];
+    const sep = () => items.length && items[items.length - 1] !== "-" && items.push("-");
+    if (n?.kind === "group") {
+      items.push({ label: "Layer Set Properties...", run: () => void actions.layerProperties.run() }, actions.duplicateLayer, actions.deleteLayer);
+    } else if (l?.isBackground && !several) {
+      items.push(actions.fromBackground, actions.duplicateLayer);
+    } else {
+      items.push(actions.layerProperties, actions.styleBlending);
+      sep();
+      items.push(actions.duplicateLayer, actions.deleteLayer);
+    }
+    sep();
+    if (n?.kind === "layer") items.push(actions.loadTransparency);
+    if (n && !(l?.isBackground && !several)) {
+      if (n.mask) items.push(actions.maskToggle, { label: "Remove Layer Mask", submenu: [actions.maskDelete, actions.maskApply] });
+      else items.push({ label: "Add Layer Mask", submenu: [actions.maskRevealAll, actions.maskHideAll, actions.maskRevealSel, actions.maskHideSel, "-", actions.maskFromTransparency] });
+    }
+    if (l?.text) items.push(actions.editText, actions.rasterizeTypeLayer);
+    if (l?.shape) items.push({ ...actions.rasterizeShape, label: "Rasterize Shape" });
+    if (l?.style) items.push({ ...actions.rasterizeStyle, label: "Rasterize Layer Style" });
+    if (n?.kind === "layer" && !l?.isBackground) {
+      sep();
+      items.push(actions.copyStyle, actions.pasteStyle, actions.clearStyle);
+      sep();
+      items.push(l?.clipped ? actions.ungroup : actions.groupWithPrevious);
+    }
+    if (several) items.push(actions.linkSelected, actions.newSetFromSelected);
+    sep();
+    items.push(actions.mergeUp, actions.mergeDown, actions.mergeVisible, actions.flatten);
+    return items;
+  };
+
   // ---------- rows ----------
   const rowFor = (n: Node, indent: boolean) => {
     const doc = app.doc!;
@@ -750,6 +788,14 @@ function layers(app: App, actions: Actions): PaletteParts {
       if (e.button !== 0 || (e.target as HTMLElement).closest("input, .vis, .mark, .set-toggle")) return;
       if (n.kind === "layer" && n.isBackground) return;
       drag = { id: n.id, sx: e.clientX, sy: e.clientY, started: false, drop: null };
+    });
+    row.addEventListener("contextmenu", (e) => {
+      // Renaming: the text field keeps its own menu (cut, copy, paste).
+      if ((e.target as HTMLElement).closest("input")) return;
+      e.preventDefault();
+      // Right-clicking a layer that isn't selected selects it; one of several selected keeps them all.
+      if (!doc.isSelected(n.id)) app.run("layer.select", { id: n.id });
+      showPopupMenu(layerContextMenu(), e.clientX, e.clientY);
     });
     row.addEventListener("click", (e) => {
       if (e.altKey && n.kind === "layer") {
@@ -877,6 +923,7 @@ function layers(app: App, actions: Actions): PaletteParts {
     "-",
     actions.layerProperties,
     "-",
+    actions.mergeUp,
     actions.mergeDown,
     actions.mergeVisible,
     actions.flatten,

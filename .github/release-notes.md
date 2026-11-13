@@ -1,7 +1,11 @@
 <!-- Notes for the next GitHub release (Desktop builds workflow). {{VERSION}} becomes the version in package.json; checksums are added automatically. -->
 Classic Image Editor is a fast, offline desktop image editor in the spirit of the classic Photoshop 7 workflow. Free and open source (MIT).
 
-**New in 0.12.0: macOS and Linux apps**, alongside Windows. Also includes everything from 0.11.0: the Move tool's Auto-Select (off by default, so the Move tool moves the layer you picked), Photoshop 7's keyboard shortcuts and temporary tools (hold Alt for the Eyedropper, Ctrl for Move, Space for Hand), a full Preferences dialog, scratch disks you can choose, and crash recovery. Quitting now asks before discarding unsaved images.
+**New in 0.13.0:**
+- **Nudge with the arrow keys:** Ctrl+arrows nudge the layer 1 pixel with any tool (add Shift for 10), the Move tool's arrows do the same, and with a selection tool the arrows move the selection outline. A run of nudges is one History step, and pixels nudged across other pixels and back come out intact.
+- **Right-click a layer** for Merge Up, Merge Down (Merge Layers with several selected), Merge Visible, Flatten Image, and the other layer commands.
+- **Alt picks colors with the Brush** (and the Pencil, Paint Bucket and Gradient) every time: it used to stop working after you changed a setting on the options bar. Hold Alt and click or drag over the image; the cursor turns into an eyedropper.
+- **New images start at 4K** (3840 x 2160).
 
 ### Windows 10/11 (64-bit)
 - **Classic-Image-Editor_{{VERSION}}_x64-setup.exe**: installer (recommended). Adds Start menu shortcuts and an uninstaller.

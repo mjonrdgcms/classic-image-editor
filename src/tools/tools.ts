@@ -122,6 +122,13 @@ export interface CropTool extends Tool {
 }
 
 const CROSSHAIR = "crosshair";
+/** The Eyedropper's cursor (Preferences > Other Cursors: Standard), with the hotspot at the tip. */
+const EYEDROPPER_CURSOR = `url("data:image/svg+xml,${encodeURIComponent(
+  "<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke-linecap='round'>" +
+    "<g stroke='#fff'><path d='M3 21 12.5 11.5' stroke-width='5'/><path d='M10.5 9.5l4 4' stroke-width='4.5'/><path d='M14 10l5-5' stroke-width='7'/></g>" +
+    "<g stroke='#000'><path d='M3 21 12.5 11.5' stroke-width='2.6'/><path d='M10.5 9.5l4 4' stroke-width='2'/><path d='M14 10l5-5' stroke-width='4.5'/></g>" +
+    "</svg>",
+)}") 2 22, crosshair`;
 
 /** Shift adds, Alt subtracts, both intersect; otherwise the options bar mode. */
 function selectMode(app: App, e: ToolEvent): SelectMode {
@@ -977,7 +984,7 @@ export function createTools(app: App): Record<ToolId, Tool> {
     label: "Eyedropper Tool",
     shortcut: "I",
     icon: "eyedropper",
-    cursor: CROSSHAIR,
+    cursor: EYEDROPPER_CURSOR,
     hint: "Click to pick the foreground color. Alt-click picks the background color.",
     down: sample,
     move: sample,

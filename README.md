@@ -3,7 +3,7 @@
 A fast, offline desktop image editor in the spirit of the classic Photoshop 7
 workflow, with a local AI assistant (via Ollama) on the roadmap.
 
-**Current version: 0.12.0** (core editing, filters, Black & White Lab, Actions, layer masks, type with 115 bundled fonts, Liquify, AI people selection, Face Swap, layered .cie files, Free Transform, Levels & Curves, retouching tools, Content-Aware Fill, layer styles, several layers at once, shapes and paths, the full PS7 toolbox, Photoshop's keyboard shortcuts, a full Preferences dialog, scratch disks and crash recovery, and now apps for macOS and Linux as well as Windows).
+**Current version: 0.13.0** (core editing, filters, Black & White Lab, Actions, layer masks, type with 115 bundled fonts, Liquify, AI people selection, Face Swap, layered .cie files, Free Transform, Levels & Curves, retouching tools, Content-Aware Fill, layer styles, several layers at once, shapes and paths, the full PS7 toolbox, Photoshop's keyboard shortcuts, a full Preferences dialog, scratch disks and crash recovery, and apps for Windows, macOS and Linux; 0.13 adds nudging with Ctrl+arrows, a right-click menu on layers with Merge Up / Merge Down / Flatten, and a 4K default for new images).
 
 ## Download
 
@@ -27,7 +27,9 @@ suite runs in both engines.
 On a Mac, the Command key does everything Ctrl does in this README
 (Cmd+Z, Cmd-click on a thumbnail, holding Cmd for the Move tool), and Option
 is Alt. On Linux the scratch disk defaults to `/tmp`; pick a roomier folder
-in Preferences > Memory & Scratch Disks for big images.
+in Preferences > Memory & Scratch Disks for big images. Some Linux desktops
+(Xfce, older KDE) move the window when you Alt-drag; if Alt-click picks no
+color there, set the desktop's window-move key to Super.
 
 ## Run it
 
@@ -67,7 +69,7 @@ browser. The desktop app receives them all.
 | Area | Included |
 | --- | --- |
 | Image windows | Every open image gets its own floating window (the default, as in PS7): drag by the title bar, resize from any edge, minimize, maximize, close. Click a window to make it active. Maximized mode shows the active image full size with a tab per image. Window > Arrange: Cascade, Tile, Floating / Maximized, Next / Previous Image (Ctrl+Tab / Ctrl+Shift+Tab). Close (Ctrl+W) and Close All (Ctrl+Alt+W) ask before discarding changes. Each image has its own undo history |
-| Files | New (presets, white / background / transparent), Open PNG, JPEG, GIF, BMP, WebP, AVIF and .cie, drag-and-drop or paste to open, **Save / Save As (Ctrl+S / Ctrl+Shift+S) to a layered .cie file**, Open Recent, Revert (F12), Save a Copy as PNG or JPEG (PS7-style 0-12 quality); double-clicking a .cie file opens it in the editor (see Files below) |
+| Files | New (suggests 4K, 3840 x 2160; presets, white / background / transparent), Open PNG, JPEG, GIF, BMP, WebP, AVIF and .cie, drag-and-drop or paste to open, **Save / Save As (Ctrl+S / Ctrl+Shift+S) to a layered .cie file**, Open Recent, Revert (F12), Save a Copy as PNG or JPEG (PS7-style 0-12 quality); double-clicking a .cie file opens it in the editor (see Files below) |
 | Image size | Image Size (Ctrl+Alt+I: pixels or percent, Document Size in inches / cm / mm / points / picas, Resolution, Resample Image on or off, constrain proportions, Bicubic / Bilinear / Lanczos / Nearest Neighbor), Canvas Size (Ctrl+Alt+C: anchor grid, relative), Rotate Canvas (180°, 90° CW / CCW, arbitrary, flip), Trim, Duplicate Image, Histogram |
 | Transform | Free Transform (Ctrl+T) on a layer, several selected layers at once, selected pixels or the selection outline: scale (in proportion by default), rotate, skew, distort, perspective, flip, numeric entry, reference point (see Transform below) |
 | Several layers | Ctrl-click layers to add or remove them, Shift-click to select a run; move, Free Transform, align, distribute, link, group into a set, duplicate, delete, merge, and change opacity, blend mode or visibility for all of them at once (see Several Layers below) |
@@ -77,7 +79,7 @@ browser. The desktop app receives them all.
 | Layer styles | Drop Shadow, Inner Shadow, Outer Glow, Inner Glow, Bevel and Emboss, Color Overlay and Stroke, editable any time, with a Styles palette of ready-made looks (see Layer Styles below) |
 | Selections | Select Subject and Select People (AI), Grow, Similar, Transform Selection, Rectangular, Elliptical, Single Row and Single Column Marquee (Normal, Fixed Aspect Ratio, Fixed Size), Lasso, Polygonal Lasso, Magnetic Lasso, Magic Wand (tolerance, contiguous, anti-alias, use all layers), Color Range, Select All / Deselect / Reselect / Inverse, Feather, Modify > Border / Smooth / Expand / Contract, new / add / subtract / intersect (buttons or Shift / Alt / Shift+Alt), drag inside a selection to move its outline, arrow-key nudge, soft-edged (anti-aliased, feathered) selections everywhere |
 | Quick Mask | Q toggles; paint black to mask, white to select; red overlay; Fill, Clear and Invert work on it |
-| Layers | New (dialog with mode, opacity, clipping), duplicate, delete, Layer via Copy / Cut, rename, show / hide (Alt-click: show only this), 22 blend modes, opacity, Background rules, Merge Down, Merge Visible, Flatten |
+| Layers | New (dialog with mode, opacity, clipping), duplicate, delete, Layer via Copy / Cut, rename, show / hide (Alt-click: show only this), 22 blend modes, opacity, Background rules, Merge Up, Merge Down, Merge Visible, Flatten, a right-click menu on every layer |
 | Layer sets | New Set, New Set From Linked, drag layers in and out, Pass Through or any blend mode, set opacity, collapse / expand, merge a set, delete set only or with contents |
 | Layer masks | On layers and layer sets; paint, fill, gradient, filter, adjust, copy and paste on the mask; non-destructive Density and Feather; link / unlink; view the mask alone or as an overlay; Mask Edge refine (see Layer Masks below) |
 | Liquify | Filter > Liquify (Ctrl+Shift+X): the full PS7 tool set, reconstruct modes, freeze masks, mesh and backdrop views, saved meshes, plus Face-Aware Liquify (see Liquify below) |
@@ -290,9 +292,25 @@ With one layer and a selection, Align lines the layer up with the
 selection.
 
 **Hold Ctrl for the Move tool.** With any tool, holding Ctrl switches to the
-Move tool until you let go, so you can nudge a layer without leaving the
+Move tool until you let go, so you can drag a layer without leaving the
 brush. While using the Pen tools, Ctrl gives Direct Selection instead, as
 in Photoshop. It can be turned off in Edit > Preferences > Tools.
+
+**Nudging.** Ctrl+arrow keys nudge the selected layers 1 pixel with any
+tool (Shift+Ctrl+arrows: 10 pixels); with the Move tool the arrows alone do
+it. With a selection, the selected pixels move instead, and with a
+selection tool the arrows move the selection outline. Nudges in a row are
+one "Nudge" step in the History, and they work like a floating selection:
+nudge a selection across other pixels and back and nothing underneath is
+lost. Alt (Ctrl+Alt with other tools) nudges a copy each time.
+
+**Right-click a layer** in the Layers palette for its menu: Layer
+Properties, Blending Options, Duplicate, Delete, masks, Rasterize, layer
+styles, clipping, and at the bottom **Merge Up** (the layer merges into the
+one above it, which keeps its name), **Merge Down** (or Merge Layers with
+several selected, Merge Layer Set for a set), **Merge Visible** and
+**Flatten Image**. Right-clicking a layer that isn't selected selects it
+first.
 
 **The Move tool moves the layers you chose.** Its options bar has
 **Auto-Select: Off / Layer / Layer Set**, Off by default: clicking
@@ -312,7 +330,7 @@ Besides those:
 | Keys | Does |
 | --- | --- |
 | Hold Space / Ctrl / Ctrl+Space / Ctrl+Alt+Space | Hand / Move / Zoom in / Zoom out, until you let go |
-| Hold Alt with the Brush, Pencil, Paint Bucket, Gradient or Color Replacement | Eyedropper (click picks the foreground color) |
+| Hold Alt with the Brush, Pencil, Paint Bucket, Gradient or Color Replacement | Eyedropper: click or drag over the image to pick the foreground color |
 | Alt with Dodge / Burn, Blur / Sharpen, the Eraser | The opposite tool; Erase to History |
 | Alt over a point with the Pen / Add / Delete Anchor | Convert Point / the other anchor tool |
 | 1 ... 0, or two quick digits (4, 5 = 45%) | The tool's opacity, exposure or strength; with other tools, the layer's opacity. Shift for flow |
@@ -326,7 +344,8 @@ Besides those:
 | Tab / Shift+Tab | Hide all palettes / all but the toolbox |
 | Page Up / Page Down (Ctrl: left / right), Home, End | Scroll a screen (Shift: 10 pixels), go to a corner |
 | Space while drawing a marquee | Move the marquee |
-| Alt+arrow with the Move tool | Nudge a copy |
+| Ctrl+arrows (any tool), arrows (Move tool) | Nudge 1 pixel; Shift for 10 |
+| Alt+arrow with the Move tool, Ctrl+Alt+arrow with others | Nudge a copy |
 | Enter | Jump to the options bar's first field |
 | Caps Lock | Precise cursors |
 | Double-click the Hand / Zoom tool | Fit on Screen / Actual Pixels |
@@ -742,7 +761,7 @@ the CPU reference does; the end-to-end suite checks the two agree.
 ## Tests
 
 ```bash
-npm test                         # 480 unit tests
+npm test                         # 520 unit tests
 npm run build && npm run e2e     # browser checks + screenshots in e2e/out/
 E2E_BROWSER=webkit npm run e2e   # the same checks in WebKit (macOS / Linux engine)
 ```
@@ -757,8 +776,11 @@ dialog, Levels, saving and reopening a .cie file, holding Ctrl for the Move
 tool, selecting, moving, aligning and transforming several layers, the
 Rectangle and Pen tools and the Paths palette, notes, slices, the Measure
 tool and the Pattern Stamp, the Move tool's Auto-Select, the temporary
-tools (Alt Eyedropper, Ctrl+Space zoom), layer stepping, blend mode and
-number keys, Transform Again, the Preferences dialog, the Color Picker,
+tools (Alt Eyedropper, also after typing in the options bar, Ctrl+Space
+zoom), nudging with Ctrl+arrows (one History step, pixels intact), the
+layer right-click menu with Merge Up / Merge Down / Flatten, layer stepping,
+blend mode and number keys, Transform Again, the Preferences dialog, the
+Color Picker, the 4K New size,
 scratch disk paging with undo, crop, rulers and guides, dragging palettes and tabs
 around, saving / resetting / loading workspaces, restarts, and remapped
 shortcuts. With the model files and two test photos in `e2e/models/` it

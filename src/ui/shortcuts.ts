@@ -8,6 +8,7 @@ import type { App } from "../app";
 import type { ToolId } from "../tools/tools";
 import type { Actions, UIAction } from "./actions";
 import { el, isModalOpen, modal } from "./dialogs";
+import { Nudger } from "./nudge";
 import { prettyShortcut, setShortcutLookup } from "./menus";
 import * as storage from "./storage";
 
@@ -52,6 +53,27 @@ export function canonical(s: string): string {
 
 const isModifierKey = (e: KeyboardEvent) => ["Control", "Shift", "Alt", "Meta"].includes(e.key);
 
+/** Inputs that don't take typing: shortcuts and held keys work while one of these has the keyboard. */
+const NOT_TYPED = new Set(["range", "checkbox", "radio", "button", "color", "submit", "reset", "file"]);
+
+/**
+ * Is the keyboard in a field that takes typing (a text or number field)?
+ * Sliders, checkboxes and drop-down lists keep focus after a click, but
+ * shouldn't swallow shortcuts (B for the Brush mustn't pick "Behind" in a
+ * blend mode list).
+ */
+function isTyping(t: EventTarget | null): boolean {
+  const el = t as HTMLElement | null;
+  const field = el?.closest?.("input, textarea, [contenteditable=true]");
+  if (!field) return false;
+  return !(field instanceof HTMLInputElement && NOT_TYPED.has(field.type));
+}
+
+const ARROWS: Record<string, [number, number]> = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
+
+/** Tools whose arrows move the selection outline. */
+const SELECTION_TOOLS: ToolId[] = ["marquee", "ellipse", "row", "column", "lasso", "polyLasso", "magneticLasso", "wand"];
+
 /** Categories for the editor and the reference. */
 const BLEND_IDS = ["normal", "dissolve", "darken", "multiply", "colorBurn", "linearBurn", "lighten", "screen", "colorDodge", "linearDodge", "overlay", "softLight", "hardLight", "vividLight", "linearLight", "pinLight", "difference", "exclusion", "hue", "saturation", "color", "luminosity", "behind", "clear"].map((m) => `blend_${m}`);
 const CATEGORIES: [string, string[]][] = [
@@ -61,7 +83,7 @@ const CATEGORIES: [string, string[]][] = [
   ["Filter", ["lastFilter", "lastFilterDialog", "filterLibrary", "fade"]],
   [
     "Layer",
-    ["newLayer", "newLayerQuick", "newSet", "newSetFromLinked", "fromBackground", "layerViaCopy", "layerViaCut", "duplicateLayer", "deleteLayer", "layerProperties", "editMask", "editLayer", "maskToggle", "maskOverlayToggle", "maskViewGray", "loadMaskSelection", "loadTransparency", "maskLinkToggle", "maskInvert", "maskEdge", "editText", "rasterizeTypeLayer", "typeConvert", "groupWithPrevious", "ungroup", "bringToFront", "bringForward", "sendBackward", "sendToBack", "mergeDown", "mergeVisible", "stampVisible", "selectLayerUp", "selectLayerDown", "selectTopLayer", "selectBottomLayer", "lockTransparency"],
+    ["newLayer", "newLayerQuick", "newSet", "newSetFromLinked", "fromBackground", "layerViaCopy", "layerViaCut", "duplicateLayer", "deleteLayer", "layerProperties", "editMask", "editLayer", "maskToggle", "maskOverlayToggle", "maskViewGray", "loadMaskSelection", "loadTransparency", "maskLinkToggle", "maskInvert", "maskEdge", "editText", "rasterizeTypeLayer", "typeConvert", "groupWithPrevious", "ungroup", "bringToFront", "bringForward", "sendBackward", "sendToBack", "mergeUp", "mergeDown", "mergeVisible", "stampVisible", "selectLayerUp", "selectLayerDown", "selectTopLayer", "selectBottomLayer", "lockTransparency"],
   ],
   ["Blend Modes", ["blendNext", "blendPrev", ...BLEND_IDS]],
   ["Select", ["selectAll", "deselect", "reselect", "inverse", "colorRange", "feather", "border", "smooth", "expand", "contract", "quickMask"]],
@@ -207,15 +229,13 @@ export class Shortcuts {
     window.addEventListener("keydown", (e) => {
       if (e.getModifierState) app.setCapsLock(e.getModifierState("CapsLock"));
       // Holding Ctrl (Cmd on a Mac) borrows the Move tool.
-      const free = !e.repeat && !isModalOpen() && !(e.target as HTMLElement).closest?.("input, select, textarea");
+      const free = !e.repeat && !isModalOpen() && !isTyping(e.target);
       if ((e.key === "Control" || e.key === "Meta") && free) app.holdCtrl(true);
       // Holding Alt with a painting tool borrows the Eyedropper.
       if (e.key === "Alt" && free) app.holdAlt(true);
-      if (isModalOpen() || isModifierKey(e)) return;
-      const target = e.target as HTMLElement;
-      const typing =
-        target.closest?.("input, select, textarea") && !(target instanceof HTMLInputElement && (target.type === "range" || target.type === "checkbox" || target.type === "radio"));
-      if (typing) return;
+      if (isModalOpen() || isModifierKey(e) || isTyping(e.target)) return;
+      // Nudges waiting for the next frame happen before anything else does.
+      if (!ARROWS[e.key]) app.nudger.flush();
       // Nothing but Space while a stroke or drag is in progress.
       if (app.isDragging && e.code !== "Space") {
         e.preventDefault();
@@ -262,46 +282,28 @@ export class Shortcuts {
         if (!a.enabled || a.enabled()) void a.run();
         return;
       }
-      // Alt+arrow with the Move tool: nudge a copy (of the selected pixels, or of the layer).
-      if (app.doc && e.altKey && !e.ctrlKey && !e.metaKey && combo.replace(/^(Alt\+)?(Shift\+)?/, "").startsWith("Arrow") && app.tool.id === "move") {
-        const k = combo.replace(/^(Alt\+)?(Shift\+)?/, "");
+      // Arrows nudge 1 px (Shift: 10 px): with the Move tool, or with any tool while Ctrl is held.
+      // Alt nudges a copy. With a selection tool, arrows move the selection outline.
+      const arrow = ARROWS[e.key];
+      if (app.doc && arrow) {
+        const ctrl = e.ctrlKey || e.metaKey;
         const d = e.shiftKey ? 10 : 1;
-        const dx = k === "ArrowLeft" ? -d : k === "ArrowRight" ? d : 0;
-        const dy = k === "ArrowUp" ? -d : k === "ArrowDown" ? d : 0;
-        e.preventDefault();
-        if (app.doc.selection && app.doc.activeLayer && !app.doc.quickMask) app.run("edit.moveSelection", { dx, dy, duplicate: true });
-        else if (app.doc.activeLayer && !app.doc.activeLayer.isBackground) {
-          try {
-            app.bus.group("Duplicate Layer", () => {
-              app.bus.dispatch("layer.duplicate", {});
-              app.bus.dispatch("layer.offset", { dx, dy });
-            });
-          } catch (err) {
-            app.toast(`Could not duplicate the layer: ${err instanceof Error ? err.message : String(err)}.`);
-          }
+        const dx = arrow[0] * d, dy = arrow[1] * d;
+        // (A crop box being set up keeps the arrows to itself.)
+        if ((ctrl || app.tool.id === "move") && !(app.baseTool.id === "crop" && app.preview.crop)) {
+          e.preventDefault();
+          if (e.altKey) this.nudgeCopy(dx, dy);
+          else app.nudger.nudge(Nudger.targetFor(app), dx, dy);
+          return;
         }
-        return;
+        if (!e.altKey && app.doc.selection && SELECTION_TOOLS.includes(app.tool.id)) {
+          e.preventDefault();
+          app.nudger.nudge("outline", dx, dy);
+          return;
+        }
       }
       if (!app.doc || e.ctrlKey || e.metaKey || e.altKey) return;
       const key = combo.replace("Shift+", "");
-      if (key.startsWith("Arrow") && app.tool.id === "move") {
-        const d = e.shiftKey ? 10 : 1;
-        const dx = key === "ArrowLeft" ? -d : key === "ArrowRight" ? d : 0;
-        const dy = key === "ArrowUp" ? -d : key === "ArrowDown" ? d : 0;
-        const l = app.doc.activeLayer;
-        const n = app.doc.activeNode;
-        if (app.doc.editMask && n?.mask && !n.maskLinked && !app.doc.quickMask) app.run("layer.offsetMask", { dx, dy });
-        else if (app.doc.selection && l && !app.doc.quickMask) app.run("edit.moveSelection", { dx, dy });
-        else if (app.doc.activeNode) app.run("layer.offset", { dx, dy });
-        e.preventDefault();
-        return;
-      }
-      if (key.startsWith("Arrow") && app.doc.selection && ["marquee", "ellipse", "lasso", "polyLasso", "wand"].includes(app.tool.id)) {
-        const d = e.shiftKey ? 10 : 1;
-        app.run("select.translate", { dx: key === "ArrowLeft" ? -d : key === "ArrowRight" ? d : 0, dy: key === "ArrowUp" ? -d : key === "ArrowDown" ? d : 0 });
-        e.preventDefault();
-        return;
-      }
       if (/^[0-9]$/.test(key)) {
         if (this.numberKey(key, e.shiftKey)) e.preventDefault();
         return;
@@ -330,6 +332,24 @@ export class Shortcuts {
       }
     });
     window.addEventListener("blur", () => app.releaseHeldKeys());
+  }
+
+  /** Alt+arrow with the Move tool (Ctrl+Alt+arrow with others): nudge a copy of the selected pixels, or of the layer. */
+  private nudgeCopy(dx: number, dy: number): void {
+    const app = this.app;
+    const doc = app.doc!;
+    app.nudger.flush();
+    if (doc.selection && doc.activeLayer && !doc.quickMask) app.run("edit.moveSelection", { dx, dy, duplicate: true });
+    else if (doc.activeLayer && !doc.activeLayer.isBackground) {
+      try {
+        app.bus.group("Duplicate Layer", () => {
+          app.bus.dispatch("layer.duplicate", {});
+          app.bus.dispatch("layer.offset", { dx, dy });
+        });
+      } catch (err) {
+        app.toast(`Could not duplicate the layer: ${err instanceof Error ? err.message : String(err)}.`);
+      }
+    }
   }
 
   /** The number keys: 1 = 10% ... 0 = 100%, two quick digits for any value (4 then 5 = 45%), Shift for flow. */
@@ -483,7 +503,7 @@ export class Shortcuts {
     }
     const extra = el("p", {
       class: "sc-note",
-      text: "Also: hold Space for the Hand tool, Ctrl for the Move tool, Ctrl+Space (Ctrl+Alt+Space) to zoom in (out), and Alt with a painting tool for the Eyedropper; Space while drawing a marquee moves it. Ctrl-click or Shift-click layers to select several. Number keys set the tool's opacity or strength (two quick digits for any value, Shift for flow), or the layer's opacity. Arrows nudge with the Move tool; Alt+arrows nudge a copy. Enter jumps to the options bar. Caps Lock makes cursors precise. Double-click the Hand tool to fit on screen, the Zoom tool for 100%. Alt+wheel or pinch zooms. In a browser a few Ctrl shortcuts are reserved; the desktop app receives them all.",
+      text: "Also: hold Space for the Hand tool, Ctrl for the Move tool, Ctrl+Space (Ctrl+Alt+Space) to zoom in (out), and Alt with a painting tool for the Eyedropper; Space while drawing a marquee moves it. Ctrl-click or Shift-click layers to select several. Number keys set the tool's opacity or strength (two quick digits for any value, Shift for flow), or the layer's opacity. Arrows nudge with the Move tool and Ctrl+arrows with any tool (Shift: 10 px); Alt+arrows nudge a copy; with a selection tool, arrows nudge the selection outline. Right-click a layer for Merge Up, Merge Down, Flatten Image and more. Enter jumps to the options bar. Caps Lock makes cursors precise. Double-click the Hand tool to fit on screen, the Zoom tool for 100%. Alt+wheel or pinch zooms. In a browser a few Ctrl shortcuts are reserved; the desktop app receives them all.",
     });
     await modal("Keyboard Shortcuts Reference", el("div", { class: "sc-editor" }, table, extra), [{ label: "OK", value: "ok", default: true }], true);
   }

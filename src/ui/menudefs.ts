@@ -183,6 +183,7 @@ export function buildMenus(app: App, a: Actions, ws: Workspace, themes: ThemeMan
         { label: "Distribute", submenu: [a.distribute_top, a.distribute_vcenter, a.distribute_bottom, "-", a.distribute_left, a.distribute_hcenter, a.distribute_right] },
         a.linkSelected,
         "-",
+        a.mergeUp,
         a.mergeDown,
         a.mergeVisible,
         a.stampVisible,

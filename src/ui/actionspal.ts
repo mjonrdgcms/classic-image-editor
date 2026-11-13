@@ -51,10 +51,12 @@ export class ActionPlayer {
       const params = { ...rec.params };
       // Ids belong to one document; drop the ones that just mean "the active layer".
       if ("id" in params && params.id === app.doc?.activeLayerId) delete params.id;
-      // A drag with the eyedropper sets the color many times: keep the last.
+      // A drag with the eyedropper sets the color many times, and repeated nudges re-run
+      // one move with a growing distance: keep the last.
       const prev = a.steps[a.steps.length - 1];
-      if (rec.name === "color.set" && prev?.command === "color.set") {
+      if ((rec.name === "color.set" || rec.replaces) && prev?.command === rec.name) {
         prev.params = params;
+        prev.label = rec.label;
         store.changed();
         return;
       }

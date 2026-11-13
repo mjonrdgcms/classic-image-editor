@@ -720,11 +720,16 @@ export function createActions(app: App, ui: UIHooks) {
     sendToBack: cmd("layer.arrange", "Ctrl+Shift+[", { to: "back" }, "Send to Back"),
     mergeDown: {
       get label() {
-        return app.doc?.activeNode?.kind === "group" ? "Merge Layer Set" : "Merge Down";
+        return (app.doc?.selectedNodes.length ?? 0) > 1 ? "Merge Layers" : app.doc?.activeNode?.kind === "group" ? "Merge Layer Set" : "Merge Down";
       },
       shortcut: "Ctrl+E",
       enabled: () => app.hasDoc && app.bus.isEnabled("layer.mergeDown"),
       run: () => void app.run("layer.mergeDown"),
+    },
+    mergeUp: {
+      label: "Merge Up",
+      enabled: () => app.hasDoc && app.bus.isEnabled("layer.mergeUp"),
+      run: () => void app.run("layer.mergeUp"),
     },
     mergeVisible: cmd("layer.mergeVisible", "Ctrl+Shift+E"),
     stampVisible: cmd("layer.stampVisible", "Ctrl+Alt+Shift+E", {}, "Merge Visible to New Layer"),

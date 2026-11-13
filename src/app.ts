@@ -7,7 +7,7 @@
 import { forgetFilter } from "./core/cmd/filters";
 import { BrushPreset, defaultBrushes, presetFromJSON, presetToJSON, roundBrush } from "./core/brushes";
 import { registerBuiltins } from "./core/builtins";
-import { CommandBus } from "./core/commands";
+import { CommandBus, type DispatchOptions } from "./core/commands";
 import { Document, RGBA } from "./core/document";
 import type { SelectMode } from "./core/selection";
 import type { Rect } from "./core/tiles";
@@ -27,6 +27,7 @@ import { scratchPlatform, type DiskInfo } from "./io/scratchstore";
 import { writeDensity } from "./io/density";
 import * as storage from "./ui/storage";
 import { alertDialog, busyPill } from "./ui/dialogs";
+import { Nudger } from "./ui/nudge";
 
 /** PS7's zoom steps. */
 export const ZOOM_STEPS = [
@@ -348,6 +349,8 @@ export class App {
   } = {};
   /** Live offset of the selection outline while it's being dragged. */
   selectionOffset: { dx: number; dy: number } | null = null;
+  /** Arrow-key nudges (one History state for a run of presses). */
+  readonly nudger = new Nudger(this);
   /** Extra overlay drawings (e.g. Face Swap marks), drawn in every image window. */
   readonly overlayPainters = new Set<(ctx: CanvasRenderingContext2D, s: Session, view: { zoom: number; x: number; y: number }) => void>();
   /**
@@ -960,7 +963,7 @@ export class App {
   /** Run a command from the UI, showing refusals instead of throwing. */
   private preparing = new WeakMap<object, string>();
 
-  run(name: string, params: Record<string, unknown> = {}): boolean {
+  run(name: string, params: Record<string, unknown> = {}, opts?: DispatchOptions): boolean {
     if (!this.doc) return false;
     try {
       // Commands with slow setup (AI models, Content-Aware Fill) get it done first, then run.
@@ -978,7 +981,7 @@ export class App {
             if (this.doc !== doc) return;
             this.opStart = started;
             this.preparedStart = true;
-            this.run(name, params);
+            this.run(name, params, opts);
             this.preparedStart = false;
           },
           (e: unknown) => {
@@ -989,7 +992,7 @@ export class App {
         );
         return false;
       }
-      this.bus.dispatch(name, params);
+      this.bus.dispatch(name, params, opts);
       return true;
     } catch (e) {
       if (e instanceof NeedsRasterizeError && (this.doc?.layerById(e.layerId)?.text || this.doc?.layerById(e.layerId)?.shape)) {
@@ -1002,7 +1005,7 @@ export class App {
         return false;
       }
       const d = this.bus.get(name);
-      const label = d ? (typeof d.label === "string" ? d.label : name) : name;
+      const label = opts?.label ?? (d ? (typeof d.label === "string" ? d.label : name) : name);
       this.toast(`Could not complete ${label}: ${(e as Error).message}.`);
       return false;
     }
@@ -1303,6 +1306,12 @@ export class App {
         e.preventDefault();
         return;
       }
+      // Clicking the image gives the keyboard back to it (a field or slider on the options bar
+      // would otherwise keep it, and shortcuts and held keys wouldn't reach the tools), as in Photoshop.
+      const focused = document.activeElement as HTMLElement | null;
+      if (focused && focused !== document.body && !vp.contains(focused) && this.tool.id !== "type") focused.blur();
+      this.syncHeldKeys(e);
+      this.nudger.flush();
       vp.setPointerCapture(e.pointerId);
       this.dragging = true;
       const tool = e.button === 1 ? this.tools.hand : this.tool;
@@ -1318,7 +1327,10 @@ export class App {
       if (this.dragging) {
         const events = e.getCoalescedEvents?.() ?? [e];
         for (const ce of events.length ? events : [e]) this.activeDragTool?.move(this.toolEvent(ce));
-      } else this.tool.hover?.(ev);
+      } else {
+        this.syncHeldKeys(e);
+        this.tool.hover?.(ev);
+      }
       this.emit("overlay");
     });
     const end = (e: PointerEvent) => {
@@ -1439,6 +1451,18 @@ export class App {
   /** Let go of every held key (the window lost focus). */
   releaseHeldKeys(): void {
     for (const by of [...this.held]) this.release(by);
+  }
+
+  /**
+   * Mouse events say whether Alt and Ctrl are down even when the keyboard
+   * events went elsewhere (a field had the keyboard, or the window was just
+   * brought forward), so Alt-click with the Brush still picks a color.
+   */
+  private syncHeldKeys(e: MouseEvent): void {
+    if (this.dragging) return;
+    if (e.altKey !== this.held.has("alt")) this.holdAlt(e.altKey);
+    const ctrl = e.ctrlKey || e.metaKey;
+    if (ctrl !== this.held.has("ctrl")) this.holdCtrl(ctrl);
   }
 
   // ---------------- feedback ----------------

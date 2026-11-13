@@ -1543,6 +1543,167 @@ check("pan never re-blends layers", perf.pan < perf.full / 5);
   });
 }
 
+// ======================================================= 0.13: nudging, 4K default, layer right-click menu, Alt sampling
+{
+  await ev(() => window.editor.workspace.show("layers"));
+  // File > New suggests 4K.
+  await ev(() => void window.editor.actions.new.run());
+  await page.waitForSelector(".modal-backdrop");
+  const nd = await ev(() => ({
+    size: [...document.querySelectorAll(".modal-backdrop input[type=number]")].slice(0, 2).map((i) => i.value).join("x"),
+    preset: document.querySelector(".modal-backdrop select").value,
+  }));
+  check("File > New suggests 3840 x 2160 (4K)", nd.size === "3840x2160" && /4K/.test(nd.preset), JSON.stringify(nd));
+  await page.getByRole("button", { name: "Cancel", exact: true }).click();
+
+  await ev(() => {
+    const app = window.editor.app;
+    app.newDocument({ name: "v13", width: 480, height: 320, contents: "white" });
+    app.run("select.rect", { x: 0, y: 0, w: 240, h: 320 });
+    app.run("color.set", { which: "foreground", r: 255, g: 0, b: 0 });
+    app.run("edit.fill", { use: "foreground" });
+    app.run("select.none", {});
+    app.run("color.set", { which: "foreground", r: 0, g: 0, b: 255 });
+    app.setZoom(1);
+  });
+  const box = async () => ev(() => {
+    const s = window.editor.app.active;
+    const v = s.compositor.view;
+    const r = s.win.viewport.getBoundingClientRect();
+    return { x0: r.left + v.x, y0: r.top + v.y, z: v.zoom };
+  });
+  const b = await box();
+  const at = (x, y) => [b.x0 + (x + 0.5) * b.z, b.y0 + (y + 0.5) * b.z];
+  const fg = () => ev(() => window.editor.app.doc.foreground.slice(0, 3).join(","));
+  const blue = () => ev(() => window.editor.app.run("color.set", { which: "foreground", r: 0, g: 0, b: 255 }));
+  const states = () => ev(() => window.editor.app.bus.history.states.length);
+
+  // Alt with the Brush samples colors, even when a field or slider on the options bar had the keyboard.
+  await page.keyboard.press("b");
+  await page.locator("#optionsbar input[type=number]").first().click();
+  await page.keyboard.down("Alt");
+  await page.mouse.move(...at(300, 100));
+  const altCursor = await ev(() => window.editor.app.viewport.style.cursor);
+  await page.mouse.click(...at(60, 60));
+  await page.keyboard.up("Alt");
+  check("Alt-click with the Brush picks a color after typing in the options bar", (await fg()) === "255,0,0", await fg());
+  check("holding Alt shows the eyedropper cursor", /svg/.test(altCursor), altCursor.slice(0, 40));
+  check("clicking the image takes the keyboard back from the options bar", await ev(() => document.activeElement === document.body));
+  await blue();
+  const n0 = await states();
+  await page.locator("#optionsbar input[type=range]").first().click();
+  await page.keyboard.down("Alt");
+  await page.mouse.move(...at(400, 200));
+  await page.mouse.down();
+  await page.mouse.move(...at(100, 200), { steps: 6 });
+  await page.mouse.up();
+  await page.keyboard.up("Alt");
+  check("Alt-dragging with the Brush samples as it goes and doesn't paint", (await fg()) === "255,0,0" && (await states()) === n0, `${await fg()} ${(await states()) - n0}`);
+  check("letting go of Alt gives the Brush back", (await ev(() => window.editor.app.tool.id)) === "brush");
+  // A drop-down that kept the keyboard doesn't swallow shortcuts.
+  await page.locator('#optionsbar select[aria-label="Mode"]').focus();
+  await page.keyboard.press("e");
+  check("a tool key works while a drop-down list has the keyboard", (await ev(() => [window.editor.app.tool.id, window.editor.app.settings.brushMode].join())) === "eraser,normal", await ev(() => [window.editor.app.tool.id, window.editor.app.settings.brushMode].join()));
+  await page.keyboard.press("b");
+
+  // Ctrl+arrows nudge the layer with any tool: one History state for a run of presses.
+  await ev(() => {
+    const app = window.editor.app;
+    app.run("layer.new", { name: "N" });
+    app.run("select.rect", { x: 300, y: 40, w: 40, h: 40 });
+    app.run("edit.fill", { use: "foreground" });
+    app.run("select.none", {});
+  });
+  const off = () => ev(() => { const l = window.editor.app.doc.activeLayer; return `${l.offsetX},${l.offsetY}`; });
+  const n1 = await states();
+  await page.keyboard.down("Control");
+  for (let i = 0; i < 3; i++) {
+    await page.keyboard.press("ArrowRight");
+    await settle();
+  }
+  await page.keyboard.press("Shift+ArrowDown");
+  await settle();
+  await page.keyboard.up("Control");
+  check("Ctrl+arrows nudge the layer with the Brush selected (Shift: 10 px)", (await off()) === "3,10" && (await ev(() => window.editor.app.tool.id)) === "brush", await off());
+  check("a run of nudges is one History state", (await states()) - n1 === 1 && (await lastLabel()) === "Nudge", `${(await states()) - n1} ${await lastLabel()}`);
+  await ev(() => window.editor.app.historyMove("back"));
+  check("one undo takes the whole run back", (await off()) === "0,0", await off());
+  await page.keyboard.press("v");
+  await page.keyboard.press("ArrowLeft");
+  await settle();
+  check("plain arrows still nudge with the Move tool", (await off()) === "-1,0", await off());
+  // Selected pixels nudged across other pixels and back come back intact.
+  const strip = () => ev(() => Array.from(window.editor.app.doc.activeLayer.grid.readRegion({ x: 280, y: 30, w: 160, h: 60 })).join(","));
+  await ev(() => {
+    const app = window.editor.app;
+    app.run("layer.offset", { dx: 1, dy: 0 });
+    app.run("select.rect", { x: 360, y: 40, w: 40, h: 40 });
+    app.run("color.set", { which: "foreground", r: 0, g: 160, b: 0 });
+    app.run("edit.fill", { use: "foreground" });
+    app.run("select.rect", { x: 300, y: 40, w: 40, h: 40 });
+  });
+  const s0 = await strip();
+  for (const k of ["ArrowRight", "ArrowRight", "ArrowRight", "ArrowRight", "ArrowLeft", "ArrowLeft", "ArrowLeft", "ArrowLeft"]) {
+    await page.keyboard.press("Shift+" + k);
+    await settle();
+  }
+  check("pixels nudged over other pixels and back are intact", (await strip()) === s0);
+  // With a selection tool, arrows move the outline.
+  await page.keyboard.press("m");
+  await page.keyboard.press("ArrowDown");
+  await settle();
+  check("arrows with the Marquee nudge the selection outline", (await ev(() => window.editor.app.doc.selection.bounds().y)) === 41 && (await lastLabel()) === "Nudge Selection", await lastLabel());
+  await ev(() => window.editor.app.run("select.none", {}));
+  // Ctrl+Alt+arrow nudges a copy.
+  const layerCount = () => ev(() => window.editor.app.doc.layers.length);
+  const lc = await layerCount();
+  await page.keyboard.press("b");
+  await page.keyboard.press("Control+Alt+ArrowRight");
+  await settle();
+  check("Ctrl+Alt+arrow nudges a copy of the layer", (await layerCount()) === lc + 1);
+  await ev(() => window.editor.app.historyMove("back"));
+
+  // Right-click a layer: Merge Up, Merge Down, Merge Visible and Flatten Image.
+  await ev(() => {
+    const app = window.editor.app;
+    app.run("layer.new", { name: "Top" });
+    app.run("select.ellipse", { x: 280, y: 20, w: 120, h: 120 });
+    app.run("color.set", { which: "foreground", r: 250, g: 200, b: 0 });
+    app.run("edit.fill", { use: "foreground" });
+    app.run("select.none", {});
+    app.run("layer.setProperties", { opacity: 60, blendMode: "multiply" });
+  });
+  await settle();
+  const comp = () => ev(() => Array.from(window.editor.app.doc.composite()));
+  const same = (a, c) => a.length === c.length && a.every((v, i) => Math.abs(v - c[i]) <= 1);
+  const names = () => ev(() => window.editor.app.doc.layers.map((l) => l.name).join(","));
+  const before = await comp();
+  const rowN = page.locator(".layer-row", { hasText: /^N$/ });
+  await rowN.click({ button: "right" });
+  const menuItems = await page.locator(".menu-pop .menu-item").allTextContents();
+  check("right-clicking a layer selects it and opens a menu", (await ev(() => window.editor.app.doc.activeLayer.name)) === "N" && ["Merge Up", "Merge Down", "Merge Visible", "Flatten Image"].every((t) => menuItems.some((m) => m.includes(t))), menuItems.join(" | "));
+  await page.waitForTimeout(250);
+  await page.screenshot({ path: out + "65-layer-menu.png" });
+  await page.locator(".menu-pop .menu-item", { hasText: "Merge Up" }).click();
+  check("Merge Up merges the layer into the one above, keeping its name", (await names()) === "Background,Top" && (await lastLabel()) === "Merge Up" && same(before, await comp()), await names());
+  await page.locator(".layer-row", { hasText: /^Top$/ }).click({ button: "right" });
+  await page.locator(".menu-pop .menu-item", { hasText: "Merge Down" }).click();
+  check("Merge Down from the menu merges into the layer below", (await names()) === "Background" && same(before, await comp()), await names());
+  await ev(() => window.editor.app.historyMove("back"));
+  await ev(() => window.editor.app.historyMove("back"));
+  await page.locator(".layer-row", { hasText: /^Top$/ }).click();
+  await page.locator(".layer-row", { hasText: /^N$/ }).click({ modifiers: ["Control"] });
+  await page.locator(".layer-row", { hasText: /^N$/ }).click({ button: "right" });
+  const multi = await page.locator(".menu-pop .menu-item").allTextContents();
+  check("with several layers selected the menu offers Merge Layers", multi.some((m) => m.includes("Merge Layers")) && (await ev(() => window.editor.app.doc.selectedNodes.length)) === 2, multi.join(" | "));
+  await page.locator(".menu-pop .menu-item", { hasText: "Flatten Image" }).click();
+  check("Flatten Image from the menu", (await names()) === "Background" && same(before, await comp()), await names());
+  await ev(async () => {
+    const a = window.editor.app;
+    for (const s of [...a.sessions]) if (s.doc.name.startsWith("v13")) await a.closeSession(s);
+  });
+}
+
 // ======================================================= People (needs model files in e2e/models)
 const md = new URL("./models/", import.meta.url).pathname;
 if (existsSync(md + "selfie_multiclass_256x256.tflite") && existsSync(md + "face_landmarker.task") && existsSync(md + "group.jpg")) {

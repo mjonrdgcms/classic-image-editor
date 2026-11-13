@@ -3,6 +3,7 @@
  * of OK / Cancel buttons on the right.
  */
 
+import { version } from "../../package.json";
 import type { App, NewDocOptions } from "../app";
 import { ICONS } from "./icons";
 
@@ -160,15 +161,21 @@ const PRESETS: { label: string; w: number; h: number; res?: number }[] = [
   { label: "1024 x 768", w: 1024, h: 768 },
   { label: "1920 x 1080", w: 1920, h: 1080 },
   { label: "2560 x 1440", w: 2560, h: 1440 },
-  { label: "3840 x 2160 (4K)", w: 3840, h: 2160 },
+  { label: "3840 x 2160 (4K UHD)", w: 3840, h: 2160 },
   { label: "Letter, 300 ppi (2550 x 3300)", w: 2550, h: 3300, res: 300 },
   { label: "A4, 300 ppi (2480 x 3508)", w: 2480, h: 3508, res: 300 },
   { label: "4 x 6 photo, 300 ppi (1800 x 1200)", w: 1800, h: 1200, res: 300 },
 ];
 
-let lastNew = { w: 800, h: 600, contents: "white" as NewDocOptions["contents"], res: 0 };
+/** File > New suggests 4K (3840 x 2160) until another size is used. */
+let lastNew = { w: 3840, h: 2160, contents: "white" as NewDocOptions["contents"], res: 0 };
 
 export async function newDocumentDialog(app: App): Promise<NewDocOptions | null> {
+  // A graphics card that can't hold a 4K image gets the largest preset it can.
+  if (lastNew.w > app.maxTextureSize || lastNew.h > app.maxTextureSize) {
+    const fit = PRESETS.filter((p) => p.w && p.w <= app.maxTextureSize && p.h <= app.maxTextureSize).sort((a, b) => b.w * b.h - a.w * a.h)[0];
+    if (fit) lastNew = { ...lastNew, w: fit.w, h: fit.h };
+  }
   const name = el("input", { type: "text", value: app.nextUntitledName() });
   const preset = el("select");
   for (const p of PRESETS) preset.append(el("option", { value: p.label, text: p.label }));
@@ -305,7 +312,9 @@ export async function shortcutsDialog(): Promise<void> {
     ["Ctrl+= / Ctrl+-", "Zoom in / out"],
     ["Ctrl+0 / Ctrl+Alt+0", "Fit on Screen / Actual Pixels"],
     ["Alt+wheel, pinch", "Zoom at cursor"],
-    ["Arrows (Move tool)", "Nudge 1 px (Shift: 10 px)"],
+    ["Arrows (Move tool), Ctrl+Arrows (any tool)", "Nudge 1 px (Shift: 10 px)"],
+    ["Alt-click (Brush, Pencil, Paint Bucket, Gradient)", "Pick a color from the image"],
+    ["Right-click a layer", "Merge Up, Merge Down, Flatten Image and more"],
     ["Tab", "Show / hide palettes"],
   ];
   const table = el("table", { class: "shortcut-table" });
@@ -321,7 +330,7 @@ export async function aboutDialog(): Promise<void> {
   const body = el(
     "div",
     {},
-    el("p", {}, el("b", { text: "Classic Image Editor" }), " 0.11.0 (Core editing, filters, Black & White Lab, Actions, layer masks, type, Liquify, people selection, face swap, layered .cie files, Free Transform, Levels & Curves, retouching tools, Content-Aware Fill, layer styles, multi-layer selection, shapes and paths, the full PS7 toolbox, PS7 keyboard shortcuts, Preferences, scratch disks and crash recovery)"),
+    el("p", {}, el("b", { text: "Classic Image Editor" }), ` ${version} (Core editing, filters, Black & White Lab, Actions, layer masks, type, Liquify, people selection, face swap, layered .cie files, Free Transform, Levels & Curves, retouching tools, Content-Aware Fill, layer styles, multi-layer selection, shapes and paths, the full PS7 toolbox, PS7 keyboard shortcuts, Preferences, scratch disks and crash recovery, for Windows, macOS and Linux)`),
     el("p", {
       text: "A fast, offline image editor in the spirit of the classic early-2000s workflow, with a local AI assistant (via Ollama) on the way.",
     }),

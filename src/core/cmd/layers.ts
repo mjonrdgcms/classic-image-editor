@@ -104,6 +104,35 @@ const edgeOf = (b: Rect, e: AlignEdge): number =>
   e === "top" ? b.y : e === "bottom" ? b.y + b.h : e === "vcenter" ? b.y + b.h / 2 : e === "left" ? b.x : e === "right" ? b.x + b.w : b.x + b.w / 2;
 const vertical = (e: AlignEdge) => e === "top" || e === "vcenter" || e === "bottom";
 
+/**
+ * Merge upper into the layer just below it (Merge Down): what you see stays
+ * the same, upper's effects, mask, opacity and blend mode are baked in, and
+ * upper is removed. lower keeps its own name, opacity and blend mode.
+ */
+function mergeIntoLower(doc: Document, upper: Layer, lower: Layer): void {
+  const full = canvasRect(doc);
+  assertPixelsEditable(lower);
+  // Effects are part of what you see, so they are merged in.
+  if (lower.style) bakeStyle(lower);
+  const fx = upper.style ? layerEffects(upper) : null;
+  let area = rectUnion(rectUnion(contentBounds(lower), contentBounds(upper)), fx?.bounds ?? null);
+  area = area && rectIntersect(area, full);
+  if (area && upper.visible) {
+    growLayer(lower, area);
+    const base = neutralCopy(lower, area);
+    const top = Object.assign(new Layer(upper.grid.width, upper.grid.height, upper.name, -2), upper.props(), { id: -2 });
+    top.grid = upper.grid;
+    top.mask = upper.mask;
+    const px = compositeNodes([base, top], area);
+    lower.mask = null;
+    lower.maskEnabled = true;
+    writeCanvas(lower, area, px);
+    if (lower.isBackground) lower.grid.compact();
+  }
+  const at = doc.locate(upper.id)!;
+  at.list.splice(at.index, 1);
+}
+
 /** Merge Layers: the selected layers become one, where the topmost was. Hidden ones are dropped. */
 function mergeSelected(doc: Document): void {
   const layers = doc.selectedLayers;
@@ -648,27 +677,36 @@ export const layerCommands: CommandDef[] = [
         const at = doc.locate(n.id)!;
         const lower = at.list[at.index - 1];
         if (!lower || lower.kind !== "layer") throw new ValidationError("there is no layer below to merge into");
-        assertPixelsEditable(lower);
-        // Effects are part of what you see, so they are merged in.
-        if (lower.style) bakeStyle(lower);
-        const fx = n.style ? layerEffects(n) : null;
-        let area = rectUnion(rectUnion(contentBounds(lower), contentBounds(n)), fx?.bounds ?? null);
-        area = area && rectIntersect(area, full);
-        if (area && n.visible) {
-          growLayer(lower, area);
-          const base = neutralCopy(lower, area);
-          const upper = Object.assign(new Layer(n.grid.width, n.grid.height, n.name, -2), n.props(), { id: -2 });
-          upper.grid = n.grid;
-          upper.mask = n.mask;
-          const px = compositeNodes([base, upper], area);
-          lower.mask = null;
-          lower.maskEnabled = true;
-          writeCanvas(lower, area, px);
-          if (lower.isBackground) lower.grid.compact();
-        }
-        at.list.splice(at.index, 1);
+        mergeIntoLower(doc, n as Layer, lower);
         doc.activeLayerId = lower.id;
       }
+      doc.editMask = false;
+      doc.emit({ type: "layers" });
+      doc.dirty(null);
+    },
+  },
+  {
+    name: "layer.mergeUp",
+    label: "Merge Up",
+    description: "Merge the active layer with the layer above it. The merged layer keeps the upper layer's name.",
+    params: { type: "object", properties: {} },
+    history: true,
+    enabled: (ctx) => {
+      const n = ctx.doc.activeNode;
+      if (!n || n.kind !== "layer" || ctx.doc.selectedNodes.length > 1) return false;
+      const at = ctx.doc.locate(n.id)!;
+      return at.list[at.index + 1]?.kind === "layer";
+    },
+    run(ctx) {
+      const doc = ctx.doc;
+      const n = targetLayer(ctx);
+      const at = doc.locate(n.id)!;
+      const upper = at.list[at.index + 1];
+      if (!upper || upper.kind !== "layer") throw new ValidationError("there is no layer above to merge with");
+      // The same merge as Merge Down from the layer above; only the name says which one it went into.
+      mergeIntoLower(doc, upper, n);
+      if (!n.isBackground) n.name = upper.name;
+      doc.activeLayerId = n.id;
       doc.editMask = false;
       doc.emit({ type: "layers" });
       doc.dirty(null);

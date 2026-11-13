@@ -112,12 +112,21 @@ export interface CommandDef<P = any> {
 export interface DispatchOptions {
   /** The caller already applied the change live (e.g. a brush stroke). */
   applied?: boolean;
+  /** History label to use instead of the command's own (arrow keys record "Nudge"). */
+  label?: string;
+  /**
+   * This replaces the previous command (the caller stepped back first and
+   * re-ran it with new values, as repeated nudges do): recorders keep one step.
+   */
+  replaces?: boolean;
 }
 
 export interface CommandRecord {
   name: string;
   params: Record<string, unknown>;
   label: string;
+  /** See DispatchOptions.replaces. */
+  replaces?: boolean;
 }
 
 type CommandListener = (rec: CommandRecord) => void;
@@ -232,12 +241,13 @@ export class CommandBus {
         throw e;
       }
     }
-    if (label === null) label = (def.label as (p: unknown, c: CommandContext) => string)(p, ctx);
+    if (opts.label) label = opts.label;
+    else if (label === null) label = (def.label as (p: unknown, c: CommandContext) => string)(p, ctx);
     if (def.history) {
       if (this.groupDepth > 0) this.groupDirty = true;
       else this.history.push(label);
     }
-    for (const fn of this.listeners) fn({ name, params: p, label });
+    for (const fn of this.listeners) fn({ name, params: p, label, ...(opts.replaces ? { replaces: true } : {}) });
   }
 
   /** Undo a failed command, keeping state History doesn't record (active layer, mask editing). */
