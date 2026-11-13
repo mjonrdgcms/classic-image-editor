@@ -61,7 +61,7 @@ jobs:
 
   macos:
     name: macOS (Apple silicon + Intel)
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
